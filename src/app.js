@@ -20,10 +20,23 @@ app.use("/admin", adminRoutes);
 app.use("/api", merchantRoutes);
 app.use("/webhooks", webhookRoutes);
 
+/* app.use(require("./modules/one_time_checkout/routes"));  */
+
+/* app.use((req, res, next) => {  
+  console.error("🔍 404 HANDLER:", req.path);  
+  res.status(404).json({ error: "Route not found" });  
+});  */ 
+
 // error fallback
 app.use((err, req, res, next) => {
-  console.error("Unhandled error:", err);
-  res.status(500).json({ error: "Server error" });
+  /* console.error("Unhandled error:", err); */
+  /* console.error("🔍 ERROR HANDLER:", { status: err.status, message: err.message }); */  
+  const status = err.status || 500;
+  const message = err.message || "Server error";
+
+  console.error("🔍 SENDING RESPONSE:", { status, message }); 
+
+  res.status(status).json({ error: message });
 });
 
 module.exports = { app };

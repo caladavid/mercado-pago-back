@@ -34,4 +34,40 @@ async function insertWebhookEvent(
   return rows[0];
 }
 
-module.exports = { insertWebhookEvent };
+async function updateOrderStatusByPaymentId(externalReference, mpStatus, paymentId) {
+  const nextOrderStatus = (() => {
+      if (mpStatus === "approved") return "paid";
+      if (mpStatus === "rejected") return "failed";
+      if (mpStatus === "refunded") return "refunded";
+      if (mpStatus === "refunded") return "refunded";
+      return "pending";
+    })();
+
+  const q = `  
+    UPDATE orders   
+    SET 
+      status = $1, 
+      mp_payment_id = COALESCE(mp_payment_id, $3),
+      updated_at = NOW()  
+    WHERE external_reference = $2  
+    AND status != 'paid'
+    RETURNING id, external_reference, user_id, total_amount, currency  
+  `;
+
+  try {
+    const { rows } = await pool.query(q, [
+      nextOrderStatus, 
+      externalReference,
+      paymentId ? String(paymentId) : null
+  ]); 
+
+    return rows[0];
+  } catch (error) {
+    throw error;
+  }
+}
+
+module.exports = { 
+  insertWebhookEvent,
+  updateOrderStatusByPaymentId
+};

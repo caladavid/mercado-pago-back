@@ -172,6 +172,7 @@ async function payCheckout(req, res, next) {
         transaction_amount: Number(transaction_amount || row.total_amount),
         description: description || `Checkout ${row.external_reference}`,
         installments: installments || 1,
+        external_reference: row.external_reference,
         payer: {
           email: payerEmail,
           first_name: payer.first_name,
@@ -195,6 +196,14 @@ async function payCheckout(req, res, next) {
         idempotencyKey,
       });
 
+      /* console.log("💳 Payment ID generado:", payment.id);  
+      console.log("💳 Payment completo:", {  
+        id: payment.id,  
+        status: payment.status,  
+        status_detail: payment.status_detail,  
+        external_reference: payment.external_reference  
+      }); */
+
       const nextOrderStatus = (() => {
         if (payment.status === "approved") return "paid";
         if (payment.status === "rejected") return "failed";
@@ -204,9 +213,17 @@ async function payCheckout(req, res, next) {
 
       await tx.query(
         `UPDATE orders
-         SET status = $1, mp_merchant_order_id = COALESCE($2, mp_merchant_order_id)
-         WHERE id = $3`,
-        [nextOrderStatus, payment.order?.id || null, row.order_id]
+        SET 
+          status = $1, 
+          mp_merchant_order_id = COALESCE($2, mp_merchant_order_id),
+          mp_payment_id = $3
+        WHERE id = $4`,
+        [
+          nextOrderStatus, 
+          payment.order?.id || null, 
+          String(payment.id),
+          row.order_id
+        ]
       );
 
       await tx.query(

@@ -107,6 +107,7 @@ async function createPayment(
     payment_method_id,
     payer,
     currency_id,
+    external_reference,
   },
   { idempotencyKey } = {}
 ) {
@@ -125,6 +126,7 @@ async function createPayment(
       installments,
       payment_method_id,
       payer,
+      external_reference,
     },
     { idempotencyKey }
   );
@@ -142,10 +144,15 @@ async function searchPaymentMethodsByBin(bin) {
   return mpRequest("GET", `/v1/payment_methods/search?bin=${q}&public_key=${encodeURIComponent(publicKey)}`);
 }
 
+async function getPaymentFromMP(paymentId) {
+  return mpRequest("GET", `/v1/payments/${paymentId}`)
+}
+
 module.exports = {
   createCustomer,
   searchCustomerByEmail,
   saveCardToCustomer,
   createPayment,
   searchPaymentMethodsByBin,
+  getPaymentFromMP
 };

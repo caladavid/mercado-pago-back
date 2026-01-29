@@ -12,7 +12,11 @@ async function withTransaction(fn) {
     await client.query("ROLLBACK");
     throw e;
   } finally {
-    client.release();
+    try {
+      client.release();
+    } catch (error) {
+      console.error("Error releasing client:", error);  
+    }
   }
 }
 

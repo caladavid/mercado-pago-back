@@ -6,3 +6,8 @@ coverage/
 .DS_Store
 dist/
 build/
+
+.nyc_output/  
+junit.xml  
+test-results/  
+coverage-report/
