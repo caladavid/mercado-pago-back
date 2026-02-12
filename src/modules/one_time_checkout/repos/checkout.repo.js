@@ -35,14 +35,17 @@ async function upsertProduct(client, { sku, name, price, currency }) {
   return rows[0];
 }
 
-async function createOrder(client, { userId, totalAmount, currency, merchantSlug }) {
+async function createOrder(client, { userId, totalAmount, currency, merchantSlug, type, planId, back_url }) {
   const externalReference = `${merchantSlug}:${randomUUID()}`;
+
+  const orderType = type || "one_time";
+
   const q = `
-    INSERT INTO orders (user_id, status, total_amount, currency, external_reference)
-    VALUES ($1,'pending',$2,$3,$4)
+    INSERT INTO orders (user_id, status, total_amount, currency, external_reference, type, plan_id, back_url)
+    VALUES ($1,'pending',$2,$3,$4,$5,$6,$7)
     RETURNING *;
   `;
-  const { rows } = await client.query(q, [userId, totalAmount, currency, externalReference]);
+  const { rows } = await client.query(q, [userId, totalAmount, currency, externalReference, orderType, planId, back_url || null]);
   return rows[0];
 }
 

@@ -1,4 +1,5 @@
 const readRepo = require("../repos/checkoutRead.repo");
+const mpRepo = require("../repos/mpCustomers.repo");
 
 exports.getCheckout = async (req, res, next) => {
   try {
@@ -9,14 +10,22 @@ exports.getCheckout = async (req, res, next) => {
 
     const { order, items } = data;
 
+    const mpCustomer = await mpRepo.findByEmail(order.email);
+
     return res.json({
       mp_public_key: process.env.MP_PUBLIC_KEY,
       mp_locale: process.env.MP_LOCALE || "es-UY",
+      mp_customer_id: mpCustomer ? mpCustomer.mp_customer_id : null,
+      type: order.type || "one_time",
+      preapproval_plan_id: order.preapproval_plan_id,
+      frequency: order.frequency,
+      frequency_type: order.frequency_type,
       order: {
         id: order.id,
         status: order.status,
         total_amount: order.total_amount,
         currency: order.currency,
+        type: order.type,
         external_reference: order.external_reference,
         created_at: order.created_at,
       },

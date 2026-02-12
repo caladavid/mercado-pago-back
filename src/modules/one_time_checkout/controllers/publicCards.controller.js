@@ -1,8 +1,12 @@
 // src/modules/one_time_checkout/controllers/publicCards.controller.js
 const { z } = require("zod");
 const repo = require("../repos/cardsRead.repo");
+const mpRepo = require("../repos/mpCustomers.repo");
+const mpClient = require("../../../integrations/mercadopago/mpClient")
+
 const { withTransaction } = require("../../../shared/db/withTransaction");
 const { saveCardForCheckout } = require("../services/saveCardForCheckout.service");
+
 
 const SaveCardBodySchema = z.object({
   mp_card_token: z.string().min(10),
@@ -17,7 +21,7 @@ const SaveCardBodySchema = z.object({
     .optional(),
 });
 
-async function listCards(req, res, next) {
+/* async function listCards(req, res, next) {
   try {
     // OJO: el router usa :external_reference
     const ref = decodeURIComponent(req.params.external_reference);
@@ -35,6 +39,44 @@ async function listCards(req, res, next) {
         exp_month: c.exp_month,
         exp_year: c.exp_year,
         status: c.status,
+      })),
+    });
+  } catch (e) {
+    next(e);
+  }
+} */
+
+async function listCards(req, res, next) {
+  try {
+    // OJO: el router usa :external_reference
+    const ref = decodeURIComponent(req.params.external_reference);
+
+    const userId = await repo.getUserIdByExternalReference(ref);
+    if (!userId) {
+      return res.status(404).json({ error: "checkout not found" });
+    }
+
+    const mpCustomer = await mpRepo.findByUserId(userId)
+
+    // Si no tiene cuenta en MP asociada, devolvemos lista vacía
+    if (!mpCustomer || !mpCustomer.mp_customer_id) {
+      console.error("ℹUsuario sin customer ID en MP.");
+      return res.json({ cards: [] });
+    }
+
+    const mpResponse = await mpClient.getCustomerCards(mpCustomer.mp_customer_id)
+
+    /* const cards = await repo.listActiveCardsByUserId(userId); */
+
+    return res.json({
+      cards: mpResponse.map((c) => ({
+        id: c.id,
+        brand: c.payment_method?.name || c.issuer?.name || "Tarjeta",
+        last4: c.last_four_digits,
+        exp_month: c.expiration_month,
+        exp_year: c.expiration_year,
+        status: "active",
+        payment_method: c.payment_method
       })),
     });
   } catch (e) {
@@ -69,4 +111,34 @@ async function saveCard(req, res, next) {
   }
 }
 
-module.exports = { listCards, saveCard };
+async function deleteCard(req, res, next) {
+  try {
+    const externalReference = decodeURIComponent(req.params.external_reference);
+
+    const card_id = req.params.card_id;
+    if (!card_id) {
+      return res.status(404).json({ error: "Falta el ID de la tarjeta" });
+    }
+
+    const userId = await repo.getUserIdByExternalReference(externalReference);
+    if (!userId) {
+       return res.status(404).json({ error: "Checkout no encontrado" });
+    }
+
+    const customerRow = await mpRepo.findByUserId(userId);
+    
+    if (!customerRow || !customerRow.mp_customer_id) {
+       return res.status(404).json({ error: "El usuario no tiene un Customer ID asociado" });
+    }
+
+    const customer_id = customerRow.mp_customer_id;
+
+    await mpClient.deleteCustomerCards(customer_id, card_id)
+
+    return res.json({ ok: true, message: "Tarjeta eliminada correctamente" });
+  } catch (error) {
+    next(error);
+  }
+}
+
+module.exports = { listCards, saveCard, deleteCard };

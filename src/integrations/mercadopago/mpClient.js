@@ -1,10 +1,12 @@
+const { PreApproval, default: MercadoPagoConfig, PreApprovalPlan } = require("mercadopago");
+
 // src/integrations/mercadopago/mpClient.js
 const BASE_URL = "https://api.mercadopago.com";
 
 const fetchFn = global.fetch ? global.fetch.bind(global) : require("node-fetch");
 
 function getTokenOrThrow() {
-  const token = process.env.MP_ACCESS_TOKEN;
+  const token = process.env.MP_ACCESS_TOKEN || process.env.MP_ACCESS_TOKEN2;
   if (!token) {
     const err = new Error("MercadoPago access token missing: set MP_ACCESS_TOKEN env");
     err.status = 500;
@@ -15,7 +17,7 @@ function getTokenOrThrow() {
 
 function mpHeaders({ idempotencyKey } = {}) {
   const token = getTokenOrThrow();
-console.log("Using MP access token of length:", token);
+/* console.log("Using MP access token of length:", token); */
   const headers = {
     "Content-Type": "application/json",
     Accept: "application/json",
@@ -26,7 +28,7 @@ console.log("Using MP access token of length:", token);
 
   // Log seguro (sin token completo)
   const prefix = token.slice(0, 12);
-  console.log("MP token prefix:", prefix, "len:", token.length);
+  /* console.log("MP token prefix:", prefix, "len:", token.length); */
 
   return headers;
 }
@@ -144,9 +146,119 @@ async function searchPaymentMethodsByBin(bin) {
   return mpRequest("GET", `/v1/payment_methods/search?bin=${q}&public_key=${encodeURIComponent(publicKey)}`);
 }
 
+// GET v1/payments/{id}
 async function getPaymentFromMP(paymentId) {
   return mpRequest("GET", `/v1/payments/${paymentId}`)
 }
+
+// GET /preapproval/{id}
+async function getSubscriptionFromMP(preapprovalId) {
+  return mpRequest("GET", `/preapproval/${preapprovalId}`)
+}
+
+// POST v1/payments/{id}/refunds
+async function createRefund(paymentId, amount = null, opts = {}) {
+  const body = amount ? { amount } : {};
+  return mpRequest(
+    "POST",
+    `/v1/payments/${paymentId}/refunds`,
+    body,
+    opts
+  );
+}
+
+async function getRefundFromMP(refundId) {  
+  return mpRequest("GET", "/v1/refunds/" + refundId);  
+} 
+
+// PUT v1/payments/{payment_id}
+async function cancelPayment(paymentId, opts = {}) {
+  return mpRequest(
+    "PUT",
+    `/v1/payments/${paymentId}`,   
+    { status: "cancelled" },
+    opts
+  );
+}
+
+// GET v1/chargebacks/{id}
+async function getChargeback(chargebackId) {
+  return mpRequest("GET", `/v1/chargebacks/${chargebackId}`);
+}
+
+const client = new MercadoPagoConfig({ 
+    accessToken: process.env.MP_ACCESS_TOKEN2
+});
+
+async function createPreApproval(payload) {
+  const preapproval = new PreApproval(client);
+  
+  try {
+    return await preapproval.create({ 
+      body: payload
+    })
+  } catch (error) {
+    console.error("❌ ERROR:", JSON.stringify(error, null, 2));
+    throw error;
+  }
+}
+
+async function createPreApprovalPlan(planData) {
+  const preapprovalPlan = new PreApprovalPlan(client);
+
+  try {
+    return await preapprovalPlan.create({ 
+      body: planData
+    })
+  } catch (error) {
+    console.error("❌ ERROR al crear Plan:", JSON.stringify(error, null, 2));
+    throw error;
+  }
+}
+
+// GET v1/customers/{id}/cards
+async function getCustomerCards(customerId) {
+  return mpRequest("GET", `/v1/customers/${customerId}/cards`);
+}
+
+// POST v1/customers/{id}/cards
+async function createCustomerCards(customerId, token, paymentMethodId, issuerId) {
+  const payload = {
+    token: token,
+    payment_method_id: paymentMethodId
+  };
+
+  // AGREGAMOS ESTO: Si hay issuer, lo enviamos. Es vital para Débito.
+  if (issuerId) {
+    payload.issuer_id = Number(issuerId);
+  }
+  
+  console.log("📤 Enviando a MP Cards:", JSON.stringify(payload));
+
+  return mpRequest("POST", `/v1/customers/${customerId}/cards`, payload);
+}
+
+// DELETE v1/customers/{customer_id}/cards/{id}
+async function deleteCustomerCards(customerId, cardId) {
+  return mpRequest("DELETE", `/v1/customers/${customerId}/cards/${cardId}`);
+}
+
+// DELETE v1/customers/{customer_id}/cards/{id}
+async function createTokenFromCardId(cardId, securityCode = null) {
+  const body = { 
+    card_id: cardId 
+  };
+  
+  // Si tuvieras el CVV (seguridad) lo mandarías aquí
+  if (securityCode) {
+    body.security_code = securityCode; 
+  }
+
+  return mpRequest("POST", "/v1/card_tokens", body);
+}
+
+
+
 
 module.exports = {
   createCustomer,
@@ -154,5 +266,16 @@ module.exports = {
   saveCardToCustomer,
   createPayment,
   searchPaymentMethodsByBin,
-  getPaymentFromMP
+  getPaymentFromMP,
+  getRefundFromMP,
+  createRefund,  
+  cancelPayment,  
+  getChargeback,  
+  createPreApproval,
+  getSubscriptionFromMP,
+  createPreApprovalPlan,
+  getCustomerCards,
+  createCustomerCards,
+  deleteCustomerCards,
+  createTokenFromCardId
 };

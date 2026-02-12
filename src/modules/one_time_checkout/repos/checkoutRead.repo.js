@@ -8,6 +8,7 @@ async function getCheckoutByExternalReference(externalReference) {
       o.total_amount,
       o.currency,
       o.external_reference,
+      o.type,
       o.created_at,
       u.email,
       u.full_name,

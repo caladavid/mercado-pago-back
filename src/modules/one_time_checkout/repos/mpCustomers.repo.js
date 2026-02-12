@@ -1,9 +1,19 @@
 const { pool } = require("../../../db/pool");
 
 async function findByUserId(userId, client = pool) {
+  console.log("🔎 [Repo] Buscando MP Customer para User ID:", userId);
   const { rows } = await client.query(
     `SELECT * FROM mp_customers WHERE user_id = $1 LIMIT 1`,
     [userId]
+  );
+  return rows[0] || null;
+}
+
+async function findByEmail(email, client = pool) {
+  console.log("🔎 [Repo] Buscando MP Customer por Email:", email);
+  const { rows } = await client.query(
+    `SELECT * FROM mp_customers WHERE email = $1 LIMIT 1`,
+    [email]
   );
   return rows[0] || null;
 }
@@ -16,7 +26,8 @@ async function insertMpCustomer({ user_id, mp_customer_id, email, raw_mp }, clie
      RETURNING *`,
     [user_id, mp_customer_id, email, raw_mp || null]
   );
+  console.log("🔎 [Repo] Resultado de la DB:", rows[0] ? "ENCONTRADO ✅" : "NO ENCONTRADO ❌", rows[0]);
   return rows[0];
 }
 
-module.exports = { findByUserId, insertMpCustomer };
+module.exports = { findByUserId, findByEmail, insertMpCustomer };

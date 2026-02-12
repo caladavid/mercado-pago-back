@@ -5,6 +5,8 @@ const morgan = require("morgan");
 
 const adminRoutes = require("./routes/admin");
 const merchantRoutes = require("./routes/merchant");
+const subscriptionRoutes = require("./modules/subscriptions/routes");
+const planRoutes = require("./modules/plans/routes");
 const webhookRoutes = require("./modules/webhooks/routes");
 
 const app = express();
@@ -18,6 +20,15 @@ app.get("/health", (req, res) => res.json({ ok: true }));
 
 app.use("/admin", adminRoutes);
 app.use("/api", merchantRoutes);
+app.use("/api/subscriptions", subscriptionRoutes);
+app.use('/api/plans', planRoutes);
+
+app.post("/webhooks/test", (req, res) => {
+    console.log("🚀 DEBUG: Webhook Directo Recibido!");
+    console.log("Data:", req.body);
+    res.status(200).send("OK DEBUG");
+});
+
 app.use("/webhooks", webhookRoutes);
 
 /* app.use(require("./modules/one_time_checkout/routes"));  */

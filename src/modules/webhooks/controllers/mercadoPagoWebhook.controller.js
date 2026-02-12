@@ -1,7 +1,8 @@
-const { getPaymentFromMP } = require("../../../integrations/mercadopago/mpClient");
+const { getPaymentFromMP, getSubscriptionFromMP } = require("../../../integrations/mercadopago/mpClient");
 const { hashToken } = require("../../../utils/merchantKeys");
 const crypto = require("crypto");
 const repo = require("../repos/webhookEvents.repo");
+const { pool } = require("../../../db/pool");
 
 function coalesceDataId(payload) {
   return (
@@ -17,7 +18,7 @@ function normalizeReceivedAt(payload) {
 }
 
 async function receiveMercadoPagoWebhook(req, res, next) {
-    /* console.log("🎯 Webhook received:", req.body); */  
+    console.log("🎯 Webhook received:", req.body);  
   try {
 
     const signature = req.headers["x-signature"];
@@ -44,10 +45,35 @@ async function receiveMercadoPagoWebhook(req, res, next) {
 
     const manifest = `id:${payload.data.id};request-id:${requestId};ts:${ts};`;
     
-    const cyphedSignature = crypto
+    const availableSecrets = [
+        process.env.MP_WEBHOOK_SECRET, 
+        process.env.MP_WEBHOOK_SECRET2
+    ].filter(Boolean);
+
+    let isValidSignature = false;
+
+    for (const secret of availableSecrets) {
+        const cyphedSignature = crypto
+            .createHmac('sha256', secret)
+            .update(manifest)
+            .digest('hex');
+
+        if (cyphedSignature === v1) {
+            isValidSignature = true;
+            break; // ¡Encontramos la correcta!
+        }
+    }
+
+    /* const cyphedSignature = crypto
         .createHmac('sha256', process.env.MP_WEBHOOK_SECRET) 
         .update(manifest)
-        .digest('hex');
+        .digest('hex'); */
+
+    if (!isValidSignature) {
+      // Esto te ayudará a debuggear si en Prod se te olvidó poner la variable
+      console.error(`❌ Firma inválida. Se probaron ${availableSecrets.length} secretos disponibles.`);
+      return res.status(401).json({ error: "Invalid signature" });
+    }
 
     if(cyphedSignature !== v1){
       return res.status(401).json({ error: "Invalid signature" }); 
@@ -69,6 +95,11 @@ async function receiveMercadoPagoWebhook(req, res, next) {
       await processApprovedPayment(payload)
     }
 
+    if (payload?.type === "subscription_preapproval") {
+      /* console.log("subscription_preapproval here"); */
+      await processApprovedSubscription(payload)
+    }
+
     if (!row?.id) {
       return res.status(200).json({ ok: true, duplicate: true });
     }
@@ -79,7 +110,6 @@ async function receiveMercadoPagoWebhook(req, res, next) {
 }
 
 async function processApprovedPayment(payload) {
-  
   try {
     /* console.log("data id:", payload.data.id); */
     const mpPayment = await getPaymentFromMP(payload.data.id);
@@ -107,6 +137,26 @@ async function processApprovedPayment(payload) {
     }
   } catch (error) {
     console.error("💥 Error in processApprovedPayment:", error);
+  }
+
+}
+
+async function processApprovedSubscription(payload) {
+  try {
+    /* console.log("data id:", payload.data.id); */
+    const mpSubscription = await getSubscriptionFromMP(payload.data.id);
+
+    if (mpSubscription.status === "authorized"){
+
+      console.log("suscripcion authorized");
+
+      await repo.syncSubscription(mpSubscription);
+
+    } else {
+      console.log(`ℹ️ El pago ${mpSubscription.id} sigue en estado: ${mpSubscription.status}. Esperando actualización...`);
+    }
+  } catch (error) {
+    console.error("💥 Error in processApprovedSubscription:", error);
   }
 
 }
