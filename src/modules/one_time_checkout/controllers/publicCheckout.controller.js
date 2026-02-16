@@ -12,8 +12,16 @@ exports.getCheckout = async (req, res, next) => {
 
     const mpCustomer = await mpRepo.findByEmail(order.email);
 
+    const isSubscription = order.type === 'subscription' || !!order.preapproval_plan_id;
+
+    const publicKeyToUse = isSubscription 
+        ? (process.env.MP_PUBLIC_KEY_SUBSCRIPTIONS || process.env.MP_PUBLIC_KEY) 
+        : process.env.MP_PUBLIC_KEY;
+
+        console.log(`🔑 Checkout cargado. Tipo: ${isSubscription ? 'Suscripción' : 'Pago Único'}. Key usada: ${publicKeyToUse}`);
+
     return res.json({
-      mp_public_key: process.env.MP_PUBLIC_KEY,
+      mp_public_key: publicKeyToUse,
       mp_locale: process.env.MP_LOCALE || "es-UY",
       mp_customer_id: mpCustomer ? mpCustomer.mp_customer_id : null,
       type: order.type || "one_time",

@@ -27,16 +27,10 @@ async function processSubscriptionLogic(data) {
         payer_email: email,
         card_token_id: card_token_id,
         back_url: back_url,
-        status: "pending", // Intentamos que nazca activa
         external_reference: external_reference,
-        user_id: user_id,
     };
 
     console.log("📦 [Logic] Creando suscripción en MP...", JSON.stringify(mpPayload, null, 2));
-
-console.log("🔑 Token Default (.env):", process.env.MP_ACCESS_TOKEN ? process.env.MP_ACCESS_TOKEN.substring(0, 10) + "..." : "UNDEFINED");
-    console.log("🔑 Token Suscripciones (.env):", process.env.MP_ACCESS_TOKEN2 ? process.env.MP_ACCESS_TOKEN2.substring(0, 10) + "..." : "UNDEFINED");
-
     console.log("📦 [Logic] Creando suscripción en MP...", JSON.stringify(mpPayload, null, 2));
 
     // 3. Llamada a Mercado Pago

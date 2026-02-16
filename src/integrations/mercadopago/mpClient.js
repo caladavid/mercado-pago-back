@@ -5,8 +5,10 @@ const BASE_URL = "https://api.mercadopago.com";
 
 const fetchFn = global.fetch ? global.fetch.bind(global) : require("node-fetch");
 
-function getTokenOrThrow() {
-  const token = process.env.MP_ACCESS_TOKEN || process.env.MP_ACCESS_TOKEN2;
+function getTokenOrThrow(isSubscription = false) {
+  const token = isSubscription 
+        ? process.env.MP_ACCESS_TOKEN2 // El APP_USR-55...
+        : process.env.MP_ACCESS_TOKEN;
   if (!token) {
     const err = new Error("MercadoPago access token missing: set MP_ACCESS_TOKEN env");
     err.status = 500;
@@ -15,8 +17,18 @@ function getTokenOrThrow() {
   return token;
 }
 
-function mpHeaders({ idempotencyKey } = {}) {
-  const token = getTokenOrThrow();
+/* function getTokenOrThrow() {
+  const token = process.env.MP_ACCESS_TOKEN || process.env.MP_ACCESS_TOKEN2;
+  if (!token) {
+    const err = new Error("MercadoPago access token missing: set MP_ACCESS_TOKEN env");
+    err.status = 500;
+    throw err;
+  }
+  return token;
+} */
+
+function mpHeaders({ idempotencyKey, isSubscription = false } = {}) {
+  const token = getTokenOrThrow(isSubscription);
 /* console.log("Using MP access token of length:", token); */
   const headers = {
     "Content-Type": "application/json",
@@ -86,8 +98,60 @@ async function createCustomer(
 
 // GET /v1/customers/search?email=...
 async function searchCustomerByEmail(email) {
+  if (!email) return null;
   const q = encodeURIComponent(email);
-  return mpRequest("GET", `/v1/customers/search?email=${q}`);
+  
+  try {
+    // Usamos el mpRequest que ya tienes definido
+    const response = await mpRequest("GET", `/v1/customers/search?email=${q}`);
+    
+    // Mercado Pago devuelve { results: [...] }
+    if (response && response.results && response.results.length > 0) {
+      return response; // Devolvemos el objeto completo para mantener compatibilidad
+    }
+    return { results: [] };
+  } catch (error) {
+    console.error(`[MP Client] Falló la búsqueda para ${email}:`, error.message);
+    // Si falla la búsqueda, devolvemos una estructura vacía para no romper el código superior
+    return { results: [] };
+  }
+}
+
+async function searchSubscriptionCustomerByEmail(email) {
+  if (!email) return null;
+  const q = encodeURIComponent(email);
+  
+  try {
+    // 💡 LA CLAVE: Pasamos el 4to argumento { isSubscription: true }
+    // Esto activa MP_ACCESS_TOKEN2 en getTokenOrThrow
+    const response = await mpRequest(
+        "GET", 
+        `/v1/customers/search?email=${q}`,
+        null, // Body es null en GET
+        { isSubscription: true } // Options
+    );
+    
+    if (response && response.results && response.results.length > 0) {
+      console.log(`[MP Sub] Usuario encontrado en cuenta suscripciones: ${email}`);
+      return response;
+    }
+    return { results: [] };
+  } catch (error) {
+    console.error(`[MP Sub Client] Falló la búsqueda (Sub) para ${email}:`, error.message);
+    return { results: [] };
+  }
+}
+
+async function createSubscriptionCustomer(
+  { email, first_name, last_name, identification, metadata },
+  { idempotencyKey } = {}
+) {
+  return mpRequest(
+    "POST",
+    "/v1/customers",
+    { email, first_name, last_name, identification, metadata },
+    { idempotencyKey, isSubscription: true } // <--- Usa el Token 2
+  );
 }
 
 // POST /v1/customers/{customer_id}/cards con { token }
@@ -191,14 +255,23 @@ const client = new MercadoPagoConfig({
 });
 
 async function createPreApproval(payload) {
+  // 💡 TIP DE ORO: Agrega un log para ver con qué token estás intentando autorizar
+  const tokenHint = process.env.MP_ACCESS_TOKEN2 ? process.env.MP_ACCESS_TOKEN2.substring(0, 15) : 'NULL';
+  console.log(`[MP] Intentando crear suscripción con Token: ${tokenHint}...`);
+
   const preapproval = new PreApproval(client);
   
   try {
     return await preapproval.create({ 
       body: payload
-    })
+    });
   } catch (error) {
-    console.error("❌ ERROR:", JSON.stringify(error, null, 2));
+    // 🛑 AQUÍ ESTABA EL "UNDEFINED":
+    console.error("❌ ERROR EN SUSCRIPCIÓN (RAW):", JSON.stringify(error, null, 2)); 
+    
+    // A veces el error real está en error.cause o error.response.data
+    if (error.cause) console.error("❌ CAUSA:", JSON.stringify(error.cause, null, 2));
+    
     throw error;
   }
 }
@@ -222,22 +295,17 @@ async function getCustomerCards(customerId) {
 }
 
 // POST v1/customers/{id}/cards
-async function createCustomerCards(customerId, token, paymentMethodId, issuerId) {
+async function createCustomerCards(customerId, token) {
+  // Según la doc que pasaste: solo necesitamos el token.
+  // MP detecta automáticamente si es Visa, Master, Débito o Crédito.
   const payload = {
-    token: token,
-    payment_method_id: paymentMethodId
+    token: token
   };
 
-  // AGREGAMOS ESTO: Si hay issuer, lo enviamos. Es vital para Débito.
-  if (issuerId) {
-    payload.issuer_id = Number(issuerId);
-  }
-  
-  console.log("📤 Enviando a MP Cards:", JSON.stringify(payload));
+  console.log(`🔗 Vinculando token a Customer ${customerId}...`);
 
   return mpRequest("POST", `/v1/customers/${customerId}/cards`, payload);
 }
-
 // DELETE v1/customers/{customer_id}/cards/{id}
 async function deleteCustomerCards(customerId, cardId) {
   return mpRequest("DELETE", `/v1/customers/${customerId}/cards/${cardId}`);
@@ -277,5 +345,7 @@ module.exports = {
   getCustomerCards,
   createCustomerCards,
   deleteCustomerCards,
-  createTokenFromCardId
+  createTokenFromCardId,
+  searchSubscriptionCustomerByEmail,
+  createSubscriptionCustomer
 };
