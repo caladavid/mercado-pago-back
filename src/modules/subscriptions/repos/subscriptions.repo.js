@@ -114,4 +114,45 @@ async function createSubscription({
     });
 }
 
-module.exports = { createSubscription };
+/**
+ * Actualiza el estado de una suscripción y registra el evento del cambio.
+ */
+async function updateStatus(mpPreapprovalId, newStatus, rawPayload = null) {
+    return await withTransaction(async (tx) => {
+        // 1. Obtenemos el estado actual antes de cambiarlo (para el historial)
+        const findQ = `SELECT id, status FROM subscriptions WHERE mp_preapproval_id = $1`;
+        const { rows } = await tx.query(findQ, [mpPreapprovalId]);
+        
+        if (rows.length === 0) return null; // No existe la suscripción
+        
+        const sub = rows[0];
+        const oldStatus = sub.status;
+
+        // 2. Actualizamos la suscripción
+        const updateQ = `
+            UPDATE subscriptions 
+            SET status = $1, updated_at = NOW(), raw_mp = COALESCE($2, raw_mp)
+            WHERE mp_preapproval_id = $3
+            RETURNING id
+        `;
+        await tx.query(updateQ, [newStatus, rawPayload, mpPreapprovalId]);
+
+        // 3. Insertamos el evento de auditoría
+        const eventQ = `
+            INSERT INTO subscription_events 
+            (subscription_id, event_type, old_status, new_status, payload, occurred_at)
+            VALUES ($1, $2, $3, $4, $5, NOW())
+        `;
+        await tx.query(eventQ, [
+            sub.id, 
+            'status_change', 
+            oldStatus, 
+            newStatus, 
+            rawPayload
+        ]);
+
+        return { id: sub.id, oldStatus, newStatus };
+    });
+}
+
+module.exports = { createSubscription, updateStatus };

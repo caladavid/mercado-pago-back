@@ -1,5 +1,6 @@
 const readRepo = require("../repos/checkoutRead.repo");
 const mpRepo = require("../repos/mpCustomers.repo");
+const { ensureMpCustomer } = require("./publicPayment.controller");
 
 exports.getCheckout = async (req, res, next) => {
   try {
@@ -10,12 +11,21 @@ exports.getCheckout = async (req, res, next) => {
 
     const { order, items } = data;
 
-    const mpCustomer = await mpRepo.findByEmail(order.email);
+    const userId = order.user_id || order.customer_id;
+    console.log(`⏳ Pre-calentando Customer para User: ${userId} (${order.email})`);
+
+    /* const mpCustomer = await mpRepo.findByEmail(order.email); */
+    const mpCustomerId = await ensureMpCustomer(
+      null, 
+      userId, 
+      { email: order.email, first_name: order.full_name }, 
+      order
+    );
 
     const isSubscription = order.type === 'subscription' || !!order.preapproval_plan_id;
 
     const publicKeyToUse = isSubscription 
-        ? (process.env.MP_PUBLIC_KEY_SUBSCRIPTIONS || process.env.MP_PUBLIC_KEY) 
+        ? process.env.MP_PUBLIC_KEY_SUBSCRIPTIONS 
         : process.env.MP_PUBLIC_KEY;
 
         console.log(`🔑 Checkout cargado. Tipo: ${isSubscription ? 'Suscripción' : 'Pago Único'}. Key usada: ${publicKeyToUse}`);
@@ -23,7 +33,7 @@ exports.getCheckout = async (req, res, next) => {
     return res.json({
       mp_public_key: publicKeyToUse,
       mp_locale: process.env.MP_LOCALE || "es-UY",
-      mp_customer_id: mpCustomer ? mpCustomer.mp_customer_id : null,
+      mp_customer_id: mpCustomerId,
       type: order.type || "one_time",
       preapproval_plan_id: order.preapproval_plan_id,
       frequency: order.frequency,

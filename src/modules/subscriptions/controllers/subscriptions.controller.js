@@ -166,109 +166,31 @@ async function createSubscriptionFromPlan(req, res, next) {
     }
 }
 
-/* async function createSubscriptionFromPlan(req, res, next) {
+async function cancelSubscription(req, res, next) {
     try {
-        const { preapproval_plan_id, email, discount_code, card_token_id, back_url, user_id, plan_id_internal } = req.body;
+    const { subscriptionId } = req.params;
 
-        const payload = req.body;
-        console.dir(payload, { depth: null });
-
-        if (!preapproval_plan_id) {
-            return res.status(400).json({ error: "Falta el preapproval_plan_id." });
-        }
-
-
-        const planQuery = "SELECT * FROM plans WHERE mp_preapproval_plan_id = $1"; 
-        const { rows } = await pool.query(planQuery, [preapproval_plan_id]);
-
-        if (!rows.length) {
-            return res.status(404).json({ error: "Plan local no encontrado" })
-        }
-        
-        const localPlan = rows[0]; 
-        
-        // If has coupons active, redirect to another plan TODO
-        if (discount_code) {
-            payload.transaction_amount = parseFloat(localPlan.amount);
-            payload.frequency = localPlan.interval_count;
-            payload.frequency_type = localPlan.interval_unit;
-            payload.reason = localPlan.name;
-            payload.plan_id_internal = localPlan.id;
-            
-
-            return createAdHocSubscription(req, res, next);
-        }
-
-        
-        if (card_token_id) {
-        
-            const mpPayload = {
-                preapproval_plan_id: preapproval_plan_id,
-                payer_email: email || "test_user_3973871619842264462@testuser.com",
-                metadata: {
-                    user_id: user_id,
-                    plan_id: plan_id_internal
-                },
-                card_token_id: card_token_id,
-                back_url: back_url,
-                status: "pending"
-            }
-    
-            console.log("--- 2. Payload a enviar a Mercado Pago ---");
-            console.dir(mpPayload, { depth: null, colors: true });
-    
-            // Crear suscripción en Mercado Pago
-            const mpSubscription = await mpClient.createPreApproval(mpPayload);
-
-            console.dir(mpSubscription, { depth: null, colors: true });
-    
-            const savedSub = await repo.createSubscription({
-                userId: user_id,               // ID del usuario
-                planId: localPlan.id,          // ID interno del plan (Integer)
-                mpSubscription: mpSubscription,// Objeto completo de MP
-                reason: localPlan.name,
-                amount: localPlan.amount,      // Precio full
-                frequency: localPlan.interval_count,          
-                frequencyType: localPlan.interval_unit,
-                currency: "UYU",
-                couponId: null,                // Sin cupón
-                discountAmount: 0
-            });
-    
-            console.log("Respuesta MP ID:", mpSubscription.id);
-    
-            res.status(201).json({
-                ok: true,
-                message: "Suscripción guardada",
-                subscription_id: savedSub.id,      
-                mp_id: mpSubscription.id,          
-                checkout_url: mpSubscription.init_point
-            });
-
-        } else {
-            console.log("🔗 Sin tarjeta. Generando Link basado en el Plan Local...");
-
-            payload.transaction_amount = localPlan.amount;
-            payload.frequency = localPlan.interval_count;
-            payload.frequency_type = localPlan.interval_unit;
-            payload.reason = localPlan.name;
-
-            payload.plan_id_internal = localPlan.id;
-
-            delete payload.preapproval_plan_id;
-
-            return createAdHocSubscription(req, res, next);
-        }
-
+    try {
+      // 1. Llamamos a Mercado Pago
+      const mpResult = await mpClient.cancelPreApproval(subscriptionId);
+      
+      // 2. Si MP dice ok, actualizamos nuestra DB usando la nueva función
+      await repo.updateStatus(subscriptionId, "cancelled", mpResult);
+      
+      return res.json({ ok: true, message: "Suscripción cancelada." });
 
     } catch (error) {
-        console.error("Error al procesar pago:", error);
-        res.status(400).json({
-            ok: false,
-            error: error.message || "Error desconocido en MP",
-            details: error.cause || error
-        });
+      // Manejo del error 400 (ya estaba cancelada en MP)
+      if (error.status === 400 && error.payload?.message?.includes("cancelled")) {
+          // Sincronizamos aunque MP falle, porque ya está cancelada allá
+          await repo.updateStatus(subscriptionId, "cancelled");
+          return res.json({ ok: true, message: "Ya estaba cancelada, DB sincronizada." });
+      }
+      throw error;
     }
-} */
+  } catch (error) {
+    next(error);
+  }
+}
 
-module.exports = { createAdHocSubscription, createSubscriptionFromPlan, processSubscriptionLogic };
+module.exports = { createAdHocSubscription, createSubscriptionFromPlan, processSubscriptionLogic, cancelSubscription };

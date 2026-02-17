@@ -64,10 +64,10 @@ async function receiveMercadoPagoWebhook(req, res, next) {
         }
     }
 
-    /* const cyphedSignature = crypto
+    const cyphedSignature = crypto
         .createHmac('sha256', process.env.MP_WEBHOOK_SECRET) 
         .update(manifest)
-        .digest('hex'); */
+        .digest('hex');
 
     if (!isValidSignature) {
       // Esto te ayudará a debuggear si en Prod se te olvidó poner la variable

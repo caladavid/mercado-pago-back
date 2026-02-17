@@ -14,6 +14,7 @@ const {
 const mpCustomersRepo = require("../repos/mpCustomers.repo");
 const { createSubscriptionFromPlan, processSubscriptionLogic } = require("../../subscriptions/controllers/subscriptions.controller");
 const { upsertUser } = require("../repos/checkout.repo");
+const { insertCardInstrument } = require("../repos/paymentInstruments.repo");
 
 const PayBodySchema = z.object({
   mp_card_token: z.string().min(10).optional(),
@@ -93,16 +94,29 @@ async function fetchAndValidateOrder(tx, externalReference, payerData){
  * Garantiza que exista un Customer en MP y en nuestra DB.
  */
 async function ensureMpCustomer(tx, userId, payerData, rowData, idempotencyKey) {
-  // 1. Buscamos primero en nuestra DB local
-  let mpCustomerRow = await mpCustomersRepo.findByUserId(userId, tx);
+  const payerEmail = payerData.email || rowData.email;
+  let mpCustomerRow = await mpCustomersRepo.findByUserId(userId, tx || null);
 
-  // NOTA: Si ya tenemos un ID guardado, lo devolvemos. 
-  // (Idealmente deberíamos guardar en DB qué cuenta de MP se usó, pero por ahora confiamos en el ID).
+  if (!mpCustomerRow && payerEmail) {
+    console.log(`🔎 Buscando localmente por email: ${payerEmail}`);
+    mpCustomerRow = await mpCustomersRepo.findByEmail(payerEmail, tx || null);
+  }
+
   if (mpCustomerRow) {
+    if (!mpCustomerRow.user_id && userId) {
+      console.log(`🔗 Vinculando User ID ${userId} al Customer ${mpCustomerRow.mp_customer_id}`);
+
+      await mpCustomersRepo.insertMpCustomer({
+        user_id: userId,
+        mp_customer_id: mpCustomerRow.mp_customer_id,
+        email: payerEmail,
+        raw_mp: mpCustomerRow.raw_mp
+      }, tx || null)
+    }
+
     return mpCustomerRow.mp_customer_id;
   }
 
-  const payerEmail = payerData.email || rowData.email;
   let customerId = null;
   let customerRaw = {};
 
@@ -116,6 +130,7 @@ async function ensureMpCustomer(tx, userId, payerData, rowData, idempotencyKey) 
 
     // 2. BÚSQUEDA CONDICIONAL SEGÚN EL MODO
     if (isSubscription) {
+        // Usamos la función que conecta con APP_USR-55...
         search = await searchSubscriptionCustomerByEmail(payerEmail);
     } else {
         // Usamos la función normal (TEST-84...)
@@ -170,12 +185,12 @@ if (!customerId) {
   // (Nota: Si vas a manejar 2 cuentas, considera agregar una columna 'mp_account_type' en esta tabla a futuro)
   await mpCustomersRepo.insertMpCustomer(
     {
-      user_id: userId,
+      user_id: userId || null,
       mp_customer_id: customerId,
       email: customerRaw.email || payerEmail,
       raw_mp: customerRaw,
     },
-    tx
+    tx || null
   );
 
   return customerId;
@@ -258,7 +273,7 @@ async function executeMpTransaction(strategy, data) {
   }
   
   // Agregamos methodId solo si es específico (no tarjeta estándar)
-  if (methodId && !['visa', 'master', 'amex', 'debvisa', 'debmaster'].includes(methodId)) {
+  if (methodId && !['visa', 'master', 'amex', 'debvisa', 'debmaster', 'oca', 'lider', 'diners'].includes(methodId)) {
       payPayload.payment_method_id = methodId;
   }
 
@@ -272,91 +287,13 @@ async function executeMpTransaction(strategy, data) {
     status_detail: payment.status_detail,
     payment_type_id: payment.payment_type_id,
     payment_method_id: payment.payment_method_id,
+    transaction_amount: payment.transaction_amount || Number(amount),
+    currency_id: payment.currency_id || "UYU",
     raw: payment
   };
 }
 
 
-/* async function executeMpTransaction(strategy, data) {
-  const { planId, token, amount, email, customerId, ref, methodId, installments, description, idempotencyKey, backUrl } = data;
-
-  // ============================================================
-  // 🔄 CASO A: SUSCRIPCIÓN
-  // ============================================================
-  if (strategy === 'subscription') {
-    if (!planId) throw new Error("Falta el preapproval_plan_id para la suscripción.");
-
-    // 1. 🔑 CONFIGURACIÓN MANUAL DEL CLIENTE (Clave del éxito)
-    // Usamos explícitamente el token de Producción/Suscripciones aquí
-    const client = new MercadoPagoConfig({ 
-        accessToken: process.env.MP_ACCESS_TOKEN2 //
-    });
-    const preapproval = new PreApproval(client);
-
-    // 2. PAYLOAD BLINDADO
-    const subPayload = {
-      preapproval_plan_id: planId,
-      card_token_id: token,
-      payer_email: email,
-      external_reference: ref,
-      back_url: backUrl || "https://spoilersafe.vercel.app/checkout/success",
-      // status: "pending" <--- NO
-    };
-
-    console.log("📦 PAYLOAD SUSCRIPCIÓN (DIRECTO):", JSON.stringify(subPayload, null, 2));
-    
-    // 3. LLAMADA DIRECTA (Sin intermediarios)
-    const mpResponse = await preapproval.create({ body: subPayload });
-    
-    console.log("✅ Suscripción creada ID:", mpResponse.id);
-
-    // 4. ADAPTADOR DE RESPUESTA
-    return {
-      id: mpResponse.id,
-      status: mpResponse.status, 
-      status_detail: "subscription_created",
-      transaction_amount: mpResponse.auto_recurring?.transaction_amount || amount || 0,
-      currency_id: mpResponse.auto_recurring?.currency_id || "UYU",
-      payment_type_id: "subscription",
-      payment_method_id: "credit_card",
-      raw: mpResponse
-    };
-  }
-
-  // ============================================================
-  // 💳 CASO B: PAGO ÚNICO
-  // ============================================================
-  // Aquí usamos el cliente por defecto o el que corresponda a pagos únicos
-  const client = new MercadoPagoConfig({ 
-      accessToken: process.env.MP_ACCESS_TOKEN || process.env.MP_ACCESS_TOKEN_TEST
-  });
-  const paymentClient = new Payment(client);
-
-  const payPayload = {
-    token,
-    transaction_amount: Number(amount),
-    description,
-    installments: installments || 1,
-    external_reference: ref,
-    payer: { email },
-    // Si tienes methodId, agrégalo
-    ...(methodId && !['visa','master','amex'].includes(methodId) ? { payment_method_id: methodId } : {})
-  };
-
-  console.log("📦 PAYLOAD PAGO:", JSON.stringify(payPayload, null, 2));
-  
-  const payment = await paymentClient.create({ body: payPayload, requestOptions: { idempotencyKey } });
-  
-  return {
-    id: payment.id,
-    status: payment.status,
-    status_detail: payment.status_detail,
-    payment_type_id: payment.payment_type_id,
-    payment_method_id: payment.payment_method_id,
-    raw: payment
-  };
-} */
-  
 /**
  * Guarda el resultado en Base de Datos (Orders y Payments).
  */
@@ -413,13 +350,17 @@ async function persistTransactionResult(tx, row, payment, payloadSent, idempoten
 }
 
 async function resolvePaymentMethod(methodId, bin) {
-  if (!methodId) return methodId;
+  /* if (!methodId) return methodId; */
+  if (methodId && methodId !== 'undefined' && methodId !== '') {
+    return methodId; 
+  }
+
   if (!bin) return null;
 
   const pm = await searchPaymentMethodsByBin(bin);
   const results = pm?.results || [];
 
-
+/* 
   const preferredOrder = new Set(["visa", "master", "amex", "diners", "oca", "lider"]);
   const candidates = results.filter(
     (r) => r.payment_type_id === "credit_card" && r.status === "active"
@@ -428,89 +369,12 @@ async function resolvePaymentMethod(methodId, bin) {
     const aScore = preferredOrder.has(a.id) ? 0 : 1;
     const bScore = preferredOrder.has(b.id) ? 0 : 1;
     return aScore - bScore;
-  });
+  }); */
+
+  const candidates = results.filter(r => r.status === "active");
 
   return candidates[0]?.id || null;
 }
-
-/* async function payCheckout(req, res, next) {
-  console.log("🔥 MODALIDAD HÍBRIDA: HARDCODE MP + DB SAVE 🔥");
-
-  try {
-    const externalReference = decodeURIComponent(req.params.external_reference);
-    
-    // 1. OBTENER TOKEN DEL FRONT (No hardcodees esto, genera uno nuevo cada vez)
-    const cardToken = req.body.token || req.body.card_token_id || req.body.mp_card_token;
-    if (!cardToken) return res.status(400).json({ error: "Falta token" });
-
-    // 2. TRANSACCIÓN DE BASE DE DATOS (Para poder guardar)
-    const result = await withTransaction(async (tx) => {
-      
-      // A. Buscamos la orden real en tu DB para tener el ID de usuario y Orden
-      // (Necesitamos que estas funciones estén disponibles en el scope)
-      const orderRow = await fetchAndValidateOrder(tx, externalReference, { email: "test_user_3973871619842264462@testuser.com" });
-
-      // B. CONFIGURACIÓN MP (Hardcodeada y Segura)
-      const client = new MercadoPagoConfig({ 
-          accessToken: process.env.MP_ACCESS_TOKEN2
-      });
-      const preapproval = new PreApproval(client);
-
-      // C. PAYLOAD BLINDADO (Usamos la ref de la DB para vincularlo)
-      const payloadLimpio = {
-        preapproval_plan_id: "4083b6bb316e46d3afe0e2aad3cc5937", 
-        card_token_id: cardToken,
-        payer_email: "test_user_3973871619842264462@testuser.com",
-        back_url: "https://www.google.com",
-        external_reference: orderRow.external_reference, // <--- ESTO VINCULA CON TU DB
-        status: "pending"
-      };
-
-      console.log("📦 Enviando a MP (CON STATUS):", JSON.stringify(payloadLimpio, null, 2));
-
-      // D. LLAMADA A MP
-      const mpResponse = await preapproval.create({ body: payloadLimpio });
-      console.log("✅ MP Respondió ID:", mpResponse.id);
-
-      // E. ADAPTADOR (Convertir respuesta de Suscripción a formato de Pago para tu DB)
-      // Esto evita el error de "amount null"
-      const transactionAmount = mpResponse.auto_recurring?.transaction_amount || 0;
-      
-      const paymentAdapter = {
-        id: mpResponse.id,
-        status: mpResponse.status, // authorized / pending
-        status_detail: "subscription_created",
-        transaction_amount: transactionAmount,
-        currency_id: "UYU",
-        payment_type_id: "subscription",
-        payment_method_id: "credit_card", // Asumimos tarjeta
-        raw: mpResponse
-      };
-
-      // F. GUARDAR EN DB (Usamos tu función original)
-      // Pasamos un objeto dummy para el payloadSent
-      await persistTransactionResult(tx, orderRow, paymentAdapter, payloadLimpio, "hardcode_key_" + Date.now())
-
-      return paymentAdapter;
-    });
-
-    // 3. RESPONDER AL FRONT
-    return res.status(201).json({
-      ok: true,
-      payment: {
-        id: result.id,
-        status: result.status,
-        type: "subscription"
-      },
-      back_url: "https://www.google.com"
-    });
-
-  } catch (error) {
-    console.log("💀 ERROR HÍBRIDO:", error);
-    if (error.cause) console.log("CAUSE:", JSON.stringify(error.cause, null, 2));
-    next(error);
-  }
-} */
 
 async function payCheckout(req, res, next) {
   try {
@@ -524,6 +388,7 @@ async function payCheckout(req, res, next) {
       mp_card_token,
       mp_registration_token,
       token,
+      save_card,
       card_id,
       payment_method_id,
       issuer_id,
@@ -565,21 +430,122 @@ async function payCheckout(req, res, next) {
     });
 
     const finalMethodId = await resolvePaymentMethod(payment_method_id, bin);
-    const mpCustomerId = await ensureMpCustomer(tx, orderRow.user_id, payer, orderRow, idempotencyKey);
+    console.log("🔍 [TRACK 1] Metodo detectado:", finalMethodId, "| BIN:", bin);
 
-    const freshToken = await getFreshToken(initialCardToken, security_code);
+    const mpCustomerId = await ensureMpCustomer(tx, orderRow.user_id, payer, orderRow, idempotencyKey);
+    console.log("🔍 [TRACK 2] MP Customer ID:", mpCustomerId);
+
+    const { rows: customerRows } = await tx.query(
+        `SELECT id FROM mp_customers WHERE mp_customer_id = $1 LIMIT 1`,
+        [mpCustomerId]
+    );
+
+    const mpCustomerRow = customerRows[0]; 
+
+    if (!mpCustomerRow) {
+        console.warn("⚠️ No se encontró la fila local para el customer:", mpCustomerId);
+    }
+
+/* if (req.body.action === 'save_only') {
+    console.log("⚠️ [MODO DEBUG] Iniciando guardado directo con NULL...");
+    // 🔥 Aquí aplicamos el fix también para tus pruebas
+    try {
+        // Intentamos guardar. Si es la tarjeta conflictiva (421301), esto fallará.
+        await createCustomerCards(mpCustomerId, initialCardToken);
+        console.log("✅ Tarjeta vinculada (Bypass).");
+    } catch (e) {
+        // Atrapamos el error para ver qué pasó, pero NO detenemos el flujo de prueba
+        console.error("❌ [Save Only Error]: No se pudo guardar en MP:", e.message);
+        // Opcional: Si quieres ver el error completo de MP descomenta esto:
+        // console.error(JSON.stringify(e, null, 2));
+    }
+    
+    return { 
+        transactionResult: { id: "test_" + Date.now(), status: "approved", status_detail: "card_linked_only" }, 
+        backUrl: orderRow.back_url 
+    };
+} */
+
+
+    
+    const isSubscription = (orderRow.type === 'subscription' || !!preapproval_plan_id || !!orderRow.mp_preapproval_plan_id);
+    const shouldSaveCard = save_card || isSubscription;
+
+    let tokenForPayment = initialCardToken;
+
+    console.log("shouldSaveCard", shouldSaveCard);
+    console.log("mpCustomerId", mpCustomerId);
+
+    if (shouldSaveCard && mpCustomerId && !mpCustomerId.startsWith('bypass_')) {
+        try {
+            console.log("🔥 [Vault] Guardando tarjeta (Estrategia NULL)...");
+            
+            console.log("freshToken", tokenForPayment);
+            // 2. Aquí agregamos el null
+            console.log("mpCustomerId en createCustomerCards", mpCustomerId);
+            console.log("initialCardToken en createCustomerCards", initialCardToken);
+            const savedCard = await createCustomerCards(mpCustomerId, initialCardToken);
+            console.log("savedCard", savedCard);
+
+            const realCardId = (savedCard && savedCard.id) ? savedCard.id : savedCard;
+            
+            if (realCardId) {
+                console.log(`✅ [Vault] Éxito. Nuevo Card ID: ${realCardId}`);
+                
+                // 🔄 ACTUALIZAMOS: Ahora sí, para el PAGO usamos el ID de la tarjeta guardada
+                tokenForPayment = realCardId; 
+
+                try {
+                    console.log("💾 Registrando instrumento en DB local...");
+                    // Asegúrate de tener acceso a 'orderRow' (de donde sacas el user_id)
+                    // y a 'mpCustomerRow' (de donde sacas el UUID de la tabla local)
+                    await insertCardInstrument({
+                        user_id: orderRow.user_id,
+                        mp_customer_row_id: mpCustomerRow.id, // El ID UUID de tu tabla mp_customers
+                        mp_card_id: realCardId,
+                        brand: savedCard.payment_method?.id || savedCard.payment_method?.name || 'card',
+                        last4: savedCard.last_four_digits,
+                        exp_month: savedCard.expiration_month,
+                        exp_year: savedCard.expiration_year,
+                        raw_mp: savedCard
+                    }, tx);
+
+                    console.log("💳 [DB SUCCESS] Tarjeta persistida en payment_instruments");
+                } catch (dbErr) {
+                    // Logueamos pero no bloqueamos el pago si falla el guardado local
+                    console.error("⚠️ Error guardando referencia local de tarjeta:", dbErr.message);
+                }
+            }
+        } catch (e) {
+            console.error("❌ [Vault Error]:", e.message);
+            if (isSubscription) throw e; 
+        }
+    }
+
+        const freshToken = await getFreshToken(initialCardToken, security_code);
+
+/*     console.log("🛑 [TEST] Deteniendo ejecución antes del pago.");
+    return {
+        transactionResult: {
+            id: "test_vault_" + Date.now(),
+            status: "approved",
+            status_detail: "card_linked_only",
+            payment_type_id: "test_mode"
+        },
+        backUrl: orderRow.back_url
+    }; */
+    
+    
+    /* const strategy = (orderRow.type === 'subscription' || !!planIdToUse) 
+    ? 'subscription' 
+    : 'one_time'; */
+    
     
     const planIdToUse = preapproval_plan_id || orderRow.mp_preapproval_plan_id;
+    const strategy = isSubscription ? 'subscription' : 'one_time';
 
-    console.log("🔍 DEBUG PLAN ID:", { 
-        fromBody: preapproval_plan_id, 
-        fromDb: orderRow.mp_preapproval_plan_id,
-        final: planIdToUse 
-    });
-    
-    const strategy = (orderRow.type === 'subscription' || !!planIdToUse) 
-                 ? 'subscription' 
-                 : 'one_time';
+    console.log("🚀 [TRACK 5] Enviando a Pago. Token/CardID final:", freshToken ? freshToken.substring(0, 10) + "..." : "NULL");
+
 
     const transactionResult = await executeMpTransaction(strategy, {
         planId: planIdToUse,
@@ -604,20 +570,20 @@ async function payCheckout(req, res, next) {
 
       await persistTransactionResult(tx, orderRow, transactionResult, payloadLog, idempotencyKey);
 
-      const isApproved = transactionResult.status === "approved" || transactionResult.status === "authorized";
+      /* const isApproved = transactionResult.status === "approved" || transactionResult.status === "authorized";
 
       if (isApproved && parsed.data.save_card && mpCustomerId && !mpCustomerId.startsWith('bypass_')) {
         try {
-          await createCustomerCards(mpCustomerId, freshToken, finalMethodId);
+          await createCustomerCards(mpCustomerId, freshToken);
           console.log("[Card] ✅ Tarjeta vinculada exitosamente");
         } catch (cardError) {
           console.error("[Card] ⚠️ No se pudo vincular la tarjeta:", cardError.payload || cardError.message);
         }
-      }
+      } */
 
       return {
         transactionResult,
-        backUrl: orderRow.back_url // 👈 Sacamos la URL del scope de la transacción
+        backUrl: orderRow.back_url 
     };
     });
 
@@ -925,7 +891,7 @@ async function payCheckout(req, res, next) {
 } */
 
 
-module.exports = { payCheckout };
+module.exports = { payCheckout, ensureMpCustomer };
 function splitName(fullName) {
   const name = (fullName || "").trim();
   if (!name) return { first: undefined, last: undefined };

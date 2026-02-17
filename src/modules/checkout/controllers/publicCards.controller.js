@@ -6,6 +6,7 @@ const mpClient = require("../../../integrations/mercadopago/mpClient")
 
 const { withTransaction } = require("../../../shared/db/withTransaction");
 const { saveCardForCheckout } = require("../services/saveCardForCheckout.service");
+const { getCheckoutByExternalReference } = require("../repos/checkoutRead.repo");
 
 
 const SaveCardBodySchema = z.object({
@@ -20,6 +21,27 @@ const SaveCardBodySchema = z.object({
     })
     .optional(),
 });
+
+async function findMpCustomerSmart(ref) {
+  // 1. Obtenemos datos de la orden (incluyendo email y user_id)
+  const checkoutData = await getCheckoutByExternalReference(ref);
+  if (!checkoutData || !checkoutData.order) return null;
+
+  const { order } = checkoutData;
+  const userId = order.user_id || order.customer_id;
+  const email = order.email;
+
+  // 2. Intentamos buscar por User ID
+  let mpCustomer = await mpRepo.findByUserId(userId);
+
+  // 3. 🧠 EL FIX: Si falla por ID, buscamos por Email
+  if ((!mpCustomer || !mpCustomer.mp_customer_id) && email) {
+      console.log(`🔎 [ListCards] UserID falló, buscando por email: ${email}`);
+      mpCustomer = await mpRepo.findByEmail(email);
+  }
+
+  return mpCustomer;
+}
 
 /* async function listCards(req, res, next) {
   try {
@@ -51,12 +73,12 @@ async function listCards(req, res, next) {
     // OJO: el router usa :external_reference
     const ref = decodeURIComponent(req.params.external_reference);
 
-    const userId = await repo.getUserIdByExternalReference(ref);
+    /* const userId = await repo.getUserIdByExternalReference(ref);
     if (!userId) {
       return res.status(404).json({ error: "checkout not found" });
-    }
+    } */
 
-    const mpCustomer = await mpRepo.findByUserId(userId)
+    const mpCustomer = await findMpCustomerSmart(ref)
 
     // Si no tiene cuenta en MP asociada, devolvemos lista vacía
     if (!mpCustomer || !mpCustomer.mp_customer_id) {
@@ -120,12 +142,11 @@ async function deleteCard(req, res, next) {
       return res.status(404).json({ error: "Falta el ID de la tarjeta" });
     }
 
-    const userId = await repo.getUserIdByExternalReference(externalReference);
+    /* const userId = await repo.getUserIdByExternalReference(externalReference);
     if (!userId) {
        return res.status(404).json({ error: "Checkout no encontrado" });
-    }
-
-    const customerRow = await mpRepo.findByUserId(userId);
+    } */
+    const customerRow = await findMpCustomerSmart(externalReference);
     
     if (!customerRow || !customerRow.mp_customer_id) {
        return res.status(404).json({ error: "El usuario no tiene un Customer ID asociado" });

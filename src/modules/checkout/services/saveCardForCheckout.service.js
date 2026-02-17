@@ -207,6 +207,7 @@ async function saveCardForCheckout({ externalReference, mpCardToken, payer }, tx
     tx
   );
 
+  
   return {
     instrument_id: instrument.id,
     brand: instrument.brand,

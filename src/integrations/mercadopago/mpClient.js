@@ -7,7 +7,7 @@ const fetchFn = global.fetch ? global.fetch.bind(global) : require("node-fetch")
 
 function getTokenOrThrow(isSubscription = false) {
   const token = isSubscription 
-        ? process.env.MP_ACCESS_TOKEN2 // El APP_USR-55...
+        ? process.env.MP_ACCESS_TOKEN2
         : process.env.MP_ACCESS_TOKEN;
   if (!token) {
     const err = new Error("MercadoPago access token missing: set MP_ACCESS_TOKEN env");
@@ -26,6 +26,9 @@ function getTokenOrThrow(isSubscription = false) {
   }
   return token;
 } */
+
+// Función auxiliar para esperar (Sleep)
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function mpHeaders({ idempotencyKey, isSubscription = false } = {}) {
   const token = getTokenOrThrow(isSubscription);
@@ -150,7 +153,7 @@ async function createSubscriptionCustomer(
     "POST",
     "/v1/customers",
     { email, first_name, last_name, identification, metadata },
-    { idempotencyKey, isSubscription: true } // <--- Usa el Token 2
+    { idempotencyKey, isSubscription: false } // <--- Usa el Token 2
   );
 }
 
@@ -294,17 +297,37 @@ async function getCustomerCards(customerId) {
   return mpRequest("GET", `/v1/customers/${customerId}/cards`);
 }
 
+
 // POST v1/customers/{id}/cards
-async function createCustomerCards(customerId, token) {
+async function createCustomerCards(customerId, token, attempt = 1) {
   // Según la doc que pasaste: solo necesitamos el token.
   // MP detecta automáticamente si es Visa, Master, Débito o Crédito.
   const payload = {
-    token: token
+    token: token,
   };
 
-  console.log(`🔗 Vinculando token a Customer ${customerId}...`);
+  console.log(`📦 [Postman Style] Enviando SOLO token a MP para el cliente ${customerId}`);
 
-  return mpRequest("POST", `/v1/customers/${customerId}/cards`, payload);
+  console.log(`📦 [MP Client] Intentando guardar tarjeta (Intento ${attempt})...`);
+
+  try {
+    return await mpRequest("POST", `/v1/customers/${customerId}/cards`, payload);
+  } catch (error) {
+    // 🧠 ESTRATEGIA DE REINTENTO:
+    // Si MP da error 500 (Internal Error) o 409 (Conflicto temporal)
+    // y es el primer intento, esperamos 1.5 segundos y probamos de nuevo.
+    if (attempt === 1 && (error.status >= 500 || error.status === 409)) {
+      console.warn(`⚠️ [MP Retry] Falló el guardado (Status ${error.status}). Reintentando en 1.5s...`);
+      
+      await sleep(1500); // Esperamos a que MP se "despierte"
+      
+      // Llamada recursiva (Intento 2)
+      return createCustomerCards(customerId, token, 2);
+    }
+    
+    // Si falla en el segundo intento o es otro error, lanzamos el error normal
+    throw error;
+  }
 }
 // DELETE v1/customers/{customer_id}/cards/{id}
 async function deleteCustomerCards(customerId, cardId) {
@@ -325,7 +348,17 @@ async function createTokenFromCardId(cardId, securityCode = null) {
   return mpRequest("POST", "/v1/card_tokens", body);
 }
 
-
+// PUT /preapproval/{id} -> Para cancelar suscripciones
+async function cancelPreApproval(preapprovalId) {
+  console.log(`🚫 [MP Client] Cancelando suscripción: ${preapprovalId}`);
+  
+  return mpRequest(
+    "PUT", 
+    `/preapproval/${preapprovalId}`, 
+    { status: "cancelled" }, // 👈 El payload mágico
+    { isSubscription: true } // ⚠️ MUY IMPORTANTE: Usar el token de suscripciones
+  );
+}
 
 
 module.exports = {
@@ -347,5 +380,6 @@ module.exports = {
   deleteCustomerCards,
   createTokenFromCardId,
   searchSubscriptionCustomerByEmail,
-  createSubscriptionCustomer
+  createSubscriptionCustomer,
+  cancelPreApproval,
 };

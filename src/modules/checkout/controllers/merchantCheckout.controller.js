@@ -41,8 +41,12 @@ exports.createCheckout = async (req, res, next) => {
       });
 
 
-      const mpCustomer = await mpRepo.findByUserId(user.id, client)
+      let mpCustomer = await mpRepo.findByUserId(user.id, client)
 
+      if (!mpCustomer && buyer.email) {
+          console.log(`🔎 [CreateCheckout] ID no encontrado. Buscando por email: ${buyer.email}`);
+          mpCustomer = await mpRepo.findByEmail(buyer.email, client);
+      }
 
       const product = await repo.upsertProduct(client, {
         sku: item.sku,
