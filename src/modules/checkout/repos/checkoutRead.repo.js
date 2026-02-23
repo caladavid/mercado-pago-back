@@ -11,6 +11,7 @@ async function getCheckoutByExternalReference(externalReference) {
       o.type,
       o.created_at,
       u.email,
+      o.back_url,
       u.full_name,
       u.doc_type,
       u.doc_number

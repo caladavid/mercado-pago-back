@@ -329,6 +329,7 @@ async function createCustomerCards(customerId, token, attempt = 1) {
     throw error;
   }
 }
+
 // DELETE v1/customers/{customer_id}/cards/{id}
 async function deleteCustomerCards(customerId, cardId) {
   return mpRequest("DELETE", `/v1/customers/${customerId}/cards/${cardId}`);
@@ -355,8 +356,8 @@ async function cancelPreApproval(preapprovalId) {
   return mpRequest(
     "PUT", 
     `/preapproval/${preapprovalId}`, 
-    { status: "cancelled" }, // 👈 El payload mágico
-    { isSubscription: true } // ⚠️ MUY IMPORTANTE: Usar el token de suscripciones
+    { status: "cancelled" }, 
+    { isSubscription: true } 
   );
 }
 

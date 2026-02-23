@@ -38,6 +38,7 @@ exports.getCheckout = async (req, res, next) => {
       preapproval_plan_id: order.preapproval_plan_id,
       frequency: order.frequency,
       frequency_type: order.frequency_type,
+      back_url: order.back_url,
       order: {
         id: order.id,
         status: order.status,

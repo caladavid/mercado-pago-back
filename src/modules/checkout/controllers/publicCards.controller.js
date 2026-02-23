@@ -7,6 +7,7 @@ const mpClient = require("../../../integrations/mercadopago/mpClient")
 const { withTransaction } = require("../../../shared/db/withTransaction");
 const { saveCardForCheckout } = require("../services/saveCardForCheckout.service");
 const { getCheckoutByExternalReference } = require("../repos/checkoutRead.repo");
+const { pool } = require("../../../db/pool");
 
 
 const SaveCardBodySchema = z.object({
@@ -86,21 +87,37 @@ async function listCards(req, res, next) {
       return res.json({ cards: [] });
     }
 
-    const mpResponse = await mpClient.getCustomerCards(mpCustomer.mp_customer_id)
+    if (mpCustomer.mp_customer_id.startsWith('bypass_')) {
+      console.warn("⚠️ [ListCards] Detectado ID de Bypass, devolviendo lista vacía.");
+      return res.json({ cards: [] });
+    }
 
-    /* const cards = await repo.listActiveCardsByUserId(userId); */
+    try {
+      const mpResponse = await mpClient.getCustomerCards(mpCustomer.mp_customer_id)
+  
+      /* const cards = await repo.listActiveCardsByUserId(userId); */
+  
+      return res.json({
+        cards: mpResponse.map((c) => ({
+          id: c.id,
+          brand: c.payment_method?.name || c.issuer?.name || "Tarjeta",
+          last4: c.last_four_digits,
+          exp_month: c.expiration_month,
+          exp_year: c.expiration_year,
+          status: "active",
+          payment_method: c.payment_method
+        })),
+      });
+      
+    } catch (error) {
+      if (error.status === 404) {
+        console.error(`❌ [ListCards] El ID ${mpCustomer.mp_customer_id} no existe en MP. Limpiando respuesta.`);
+        return res.json({ cards: [] }); 
+      }
+      // Si es otro tipo de error (500, etc), que lo maneje el catch de afuera
+      throw error;
+    }
 
-    return res.json({
-      cards: mpResponse.map((c) => ({
-        id: c.id,
-        brand: c.payment_method?.name || c.issuer?.name || "Tarjeta",
-        last4: c.last_four_digits,
-        exp_month: c.expiration_month,
-        exp_year: c.expiration_year,
-        status: "active",
-        payment_method: c.payment_method
-      })),
-    });
   } catch (e) {
     next(e);
   }
@@ -154,7 +171,14 @@ async function deleteCard(req, res, next) {
 
     const customer_id = customerRow.mp_customer_id;
 
-    await mpClient.deleteCustomerCards(customer_id, card_id)
+    await mpClient.deleteCustomerCards(customer_id, card_id);
+
+    await pool.query(
+      `DELETE FROM payment_instruments WHERE mp_card_id = $1`, 
+      [card_id]
+    );
+
+    console.log(`✅ [Vault] Tarjeta ${card_id} eliminada de MP y de la BD local.`);
 
     return res.json({ ok: true, message: "Tarjeta eliminada correctamente" });
   } catch (error) {
