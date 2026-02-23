@@ -60,14 +60,14 @@ async function receiveMercadoPagoWebhook(req, res, next) {
 
         if (cyphedSignature === v1) {
             isValidSignature = true;
-            break; // ¡Encontramos la correcta!
+            break; 
         }
     }
 
-    const cyphedSignature = crypto
+    /* const cyphedSignature = crypto
         .createHmac('sha256', process.env.MP_WEBHOOK_SECRET) 
         .update(manifest)
-        .digest('hex');
+        .digest('hex'); */
 
     if (!isValidSignature) {
       // Esto te ayudará a debuggear si en Prod se te olvidó poner la variable
@@ -75,9 +75,9 @@ async function receiveMercadoPagoWebhook(req, res, next) {
       return res.status(401).json({ error: "Invalid signature" });
     }
 
-    if(cyphedSignature !== v1){
+    /* if(cyphedSignature !== v1){
       return res.status(401).json({ error: "Invalid signature" }); 
-    }
+    } */
 
     const dataId = coalesceDataId(payload);
     const row = await repo.insertWebhookEvent({
@@ -91,19 +91,38 @@ async function receiveMercadoPagoWebhook(req, res, next) {
       processingStatus: "pending",
     });
 
-    if (payload?.type === "payment") {
+    if (!row?.id) {
+      console.log(`⚠️ Webhook ignorado: Ya fue procesado anteriormente (DataID: ${dataId})`);
+      return res.status(200).json({ ok: true, duplicate: true });
+    }
+
+    res.status(200).json({ ok: true, id: row.id });
+
+    const eventType = payload?.type;
+
+    switch (eventType) {
+      case "payment":
+        processApprovedPayment(payload).catch(e => console.error(e))
+        break;
+      case "subscription_preapproval":
+        processApprovedSubscription(payload).catch(e => console.error(e))
+        break;
+      default:
+        break;
+    }
+
+    /* if (payload?.type === "payment") {
       await processApprovedPayment(payload)
     }
 
     if (payload?.type === "subscription_preapproval") {
-      /* console.log("subscription_preapproval here"); */
       await processApprovedSubscription(payload)
-    }
+    } */
 
-    if (!row?.id) {
+    /* if (!row?.id) {
       return res.status(200).json({ ok: true, duplicate: true });
     }
-    return res.status(200).json({ ok: true, id: row.id });
+    return res.status(200).json({ ok: true, id: row.id }); */
   } catch (e) {
     next(e);
   }
@@ -111,30 +130,40 @@ async function receiveMercadoPagoWebhook(req, res, next) {
 
 async function processApprovedPayment(payload) {
   try {
-    /* console.log("data id:", payload.data.id); */
     const mpPayment = await getPaymentFromMP(payload.data.id);
     const paymentId = mpPayment.id;
     const status = mpPayment.status;
     const externalReference = mpPayment.external_reference
-    /* console.log("mpPayment", mpPayment); */
 
-
-    if (mpPayment.status === "approved"){
-      /* const orderId = mpPayment.external_reference */
-      /* console.log("mpPayment", mpPayment); */
-      /* console.log(`[DEBUG] Buscando en DB la orden con external_reference: "${externalReference}"`); */
-
-      const result = await repo.updateOrderStatusByPaymentId(externalReference, status, paymentId)
-  
-        if (result) {
-            console.log(`✅ Orden ${externalReference} actualizada a ${status}`);
-        } else {
-          console.error("⚠️ No se encontró la orden:", externalReference);
-        }
-
-    } else {
-      console.log(`ℹ️ El pago ${mpPayment.id} sigue en estado: ${mpPayment.status}. Esperando actualización...`);
+    const result = await repo.updateOrderStatusByPaymentId(externalReference, status, paymentId)
+    
+    if (!result) {
+      console.log(`[Webhook] La orden ${externalReference} ya estaba actualizada o no requiere cambios.`);
+      return;
     }
+
+    switch (status) {
+      case "approved":
+        console.log(`✅ ¡ÉXITO! Orden ${externalReference} pagada (Pago ID: ${paymentId}).`);
+        // Aquí podrías enviar un email al cliente
+        break;
+      case "in_process":
+      case "pending":
+        console.log(`⏳ Orden ${externalReference} en espera. Motivo: ${statusDetail}`);
+        break;
+      case "rejected":
+      case "cancelled":
+        console.warn(`❌ Orden ${externalReference} fallida/rechazada. Motivo: ${statusDetail}`);
+        // Aquí podrías liberar stock o enviar email de pago fallido
+        break;
+      case "refunded":
+        console.log(`💰 Pago ${paymentId} devuelto al cliente (Orden: ${externalReference}).`);
+        break;
+      default:
+        console.log(`❓ Estado no reconocido por el sistema: ${status}`);
+    }
+    
+    
   } catch (error) {
     console.error("💥 Error in processApprovedPayment:", error);
   }
@@ -144,6 +173,49 @@ async function processApprovedPayment(payload) {
 async function processApprovedSubscription(payload) {
   try {
     /* console.log("data id:", payload.data.id); */
+    const mpSubscription = await getSubscriptionFromMP(payload.data.id);
+    const subId = mpSubscription.id;
+    const status = mpSubscription.status;
+    
+    const isSynced = await repo.syncSubscription(mpSubscription);
+    if (isSynced) {
+    console.log("✅ Sincronización completa.");
+}
+
+    if (isSynced) {
+      // 3. Acciones específicas (como enviar emails) según el nuevo estado
+      switch (status) {
+        case "authorized":
+          console.log(`✅ Suscripción ${subId} ACTIVA y cobrando.`);
+          // Ej: Enviar email de "Suscripción renovada/creada"
+          break;
+        case "paused":
+          console.log(`⏸️ Suscripción ${subId} PAUSADA.`);
+          // Ej: Quitar acceso temporal a la plataforma
+          break;
+        case "cancelled":
+          console.log(`❌ Suscripción ${subId} CANCELADA.`);
+          // Ej: Enviar email de "Lamentamos que te vayas" y revocar acceso
+          break;
+        case "pending":
+          console.log(`Suscripción ${subId} PENDIENTE de inicio o pago.`);
+          break;
+        default:
+          console.log(`Suscripción ${subId} actualizada a estado no mapeado: ${status}`);
+      }
+    } else {
+      console.warn(`⚠️ No se pudo sincronizar la suscripción ${subId} en la BD local.`);
+    }
+
+  } catch (error) {
+    console.error("💥 Error in processApprovedSubscription:", error);
+  }
+
+}
+
+/* async function processApprovedSubscription(payload) {
+  try {
+    /* console.log("data id:", payload.data.id); *
     const mpSubscription = await getSubscriptionFromMP(payload.data.id);
 
     if (mpSubscription.status === "authorized"){
@@ -159,6 +231,6 @@ async function processApprovedSubscription(payload) {
     console.error("💥 Error in processApprovedSubscription:", error);
   }
 
-}
+} */
 
 module.exports = { receiveMercadoPagoWebhook };

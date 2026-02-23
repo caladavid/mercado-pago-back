@@ -41,9 +41,22 @@ async function updateOrderStatusByPaymentId(externalReference, mpStatus, payment
       if (mpStatus === "refunded") return "refunded";
       if (mpStatus === "charged_back") return "disputed";
       if (mpStatus === "cancelled") return "cancelled";
+      if (mpStatus === "in_process" || mpStatus === "pending") return "pending_payment";
       return "pending";
     })();
 
+  const q = `  
+    UPDATE orders   
+    SET 
+      status = $1, 
+      mp_payment_id = COALESCE($3, mp_payment_id),
+      updated_at = NOW()  
+    WHERE external_reference = $2  
+    AND status != $1
+    RETURNING id, external_reference, user_id, total_amount, currency  
+  `;
+
+/* 
   const q = `  
     UPDATE orders   
     SET 
@@ -56,7 +69,7 @@ async function updateOrderStatusByPaymentId(externalReference, mpStatus, payment
       OR ($1 IN ('refunded', 'disputed'))
     )
     RETURNING id, external_reference, user_id, total_amount, currency  
-  `;
+  `; */
 
   try {
     const { rows } = await pool.query(q, [
@@ -67,6 +80,7 @@ async function updateOrderStatusByPaymentId(externalReference, mpStatus, payment
 
     return rows[0];
   } catch (error) {
+    console.error(`💥 Error SQL en updateOrderStatusByPaymentId para ${externalReference}:`, error.message);
     throw error;
   }
 }
