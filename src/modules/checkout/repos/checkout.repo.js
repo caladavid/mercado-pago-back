@@ -20,32 +20,33 @@ async function upsertUser(client, { email, fullName, docType, docNumber }) {
   return rows[0];
 }
 
-async function upsertProduct(client, { sku, name, price, currency }) {
+async function upsertProduct(client, { sku, name, price, currency, description }) {
   const q = `
-    INSERT INTO products (name, sku, price, currency, active)
-    VALUES ($1,$2,$3,$4,true)
+    INSERT INTO products (name, sku, price, currency, description, active)
+    VALUES ($1,$2,$3,$4,$5,true)
     ON CONFLICT (sku) DO UPDATE SET
       name = EXCLUDED.name,
       price = EXCLUDED.price,
       currency = EXCLUDED.currency,
+      description = EXCLUDED.description,
       active = true
     RETURNING *;
   `;
-  const { rows } = await client.query(q, [name, sku, price, currency]);
+  const { rows } = await client.query(q, [name, sku, price, currency, description || null]);
   return rows[0];
 }
 
-async function createOrder(client, { userId, totalAmount, currency, merchantSlug, type, planId, back_url }) {
+async function createOrder(client, { userId, merchantId, totalAmount, currency, merchantSlug, type, planId, back_url }) {
   const externalReference = `${merchantSlug}:${randomUUID()}`;
 
   const orderType = type || "one_time";
 
   const q = `
-    INSERT INTO orders (user_id, status, total_amount, currency, external_reference, type, plan_id, back_url)
-    VALUES ($1,'pending',$2,$3,$4,$5,$6,$7)
+    INSERT INTO orders (user_id, merchant_id, status, total_amount, currency, external_reference, type, plan_id, back_url)
+    VALUES ($1,$2,'pending',$3,$4,$5,$6,$7,$8)
     RETURNING *;
   `;
-  const { rows } = await client.query(q, [userId, totalAmount, currency, externalReference, orderType, planId, back_url || null]);
+  const { rows } = await client.query(q, [userId, merchantId, totalAmount, currency, externalReference, orderType, planId, back_url || null]);
   return rows[0];
 }
 

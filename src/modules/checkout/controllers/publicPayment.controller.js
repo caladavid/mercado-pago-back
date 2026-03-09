@@ -50,6 +50,7 @@ async function fetchAndValidateOrder(tx, externalReference, payerData){
   const { rows } = await tx.query(
     `SELECT
         o.id as order_id,
+        o.merchant_id,
         o.status as order_status,
         o.total_amount,
         o.currency,
@@ -61,10 +62,15 @@ async function fetchAndValidateOrder(tx, externalReference, payerData){
         u.email,
         u.full_name,
         u.doc_type,
-        u.doc_number
+        u.doc_number,
+
+        pr.description,
+        pr.name as title
       FROM orders o
       JOIN users u ON u.id = o.user_id
       LEFT JOIN plans p ON o.plan_id = p.id
+      LEFT JOIN order_items oi ON oi.order_id = o.id
+      LEFT JOIN products pr ON pr.id = oi.product_id
       WHERE o.external_reference = $1
       LIMIT 1`,
     [externalReference]
@@ -120,8 +126,8 @@ async function ensureMpCustomer(tx, userId, payerData, rowData, idempotencyKey) 
   let customerId = null;
   let customerRaw = {};
 
+
   const isSubscription = rowData.type === 'subscription' || !!rowData.mp_preapproval_plan_id;
-  /* const isSubscription = false; */
   console.log(`🔎 Buscando Customer para: ${payerEmail} (Modo: ${isSubscription ? 'Suscripción/Token2' : 'Pago/Token1'})`);
 
   try {
@@ -218,7 +224,7 @@ async function getFreshToken(cardToken, cvv) {
  * Ejecuta la transacción en MP (Suscripción o Pago Único).
  */
 async function executeMpTransaction(strategy, data) {
-  const { planId, token, amount, email, customerId, ref, methodId, installments, description, idempotencyKey, backUrl, userId } = data;
+  const { planId, token, amount, email, customerId, ref, methodId, installments, description, idempotencyKey, backUrl, userId, merchantId } = data;
 
   // CASO A: SUSCRIPCIÓN
   if (strategy === 'subscription') {
@@ -231,6 +237,7 @@ async function executeMpTransaction(strategy, data) {
       external_reference: ref,
       user_id: userId,
       back_url: backUrl,
+      merchant_id: merchantId
 
     };
 
@@ -272,9 +279,13 @@ async function executeMpTransaction(strategy, data) {
   }
   
   // Agregamos methodId solo si es específico (no tarjeta estándar)
-  if (methodId && !['visa', 'master', 'amex', 'debvisa', 'debmaster', 'oca', 'lider', 'diners'].includes(methodId)) {
+  /* if (methodId && !['visa', 'master', 'amex', 'debvisa', 'debmaster', 'oca', 'lider', 'diners'].includes(methodId)) {
       payPayload.payment_method_id = methodId;
-  }
+  } */
+
+    if (methodId) {
+      payPayload.payment_method_id = methodId;
+    }
 
   console.log("📦 PAYLOAD PAGO:", JSON.stringify(payPayload, null, 2));
   
@@ -297,12 +308,14 @@ async function executeMpTransaction(strategy, data) {
  * Guarda el resultado en Base de Datos (Orders y Payments).
  */
 async function persistTransactionResult(tx, row, payment, payloadSent, idempotencyKey) {
-  const nextOrderStatus = (() => {
+  /* const nextOrderStatus = (() => {
     if (payment.status === "approved") return "paid";
     if (payment.status === "rejected") return "failed";
     if (payment.status === "refunded") return "refunded";
     return "pending";
-  })();
+  })(); */
+
+  const nextOrderStatus = "pending"
 
   await tx.query(
     `UPDATE orders
@@ -376,6 +389,7 @@ async function resolvePaymentMethod(methodId, bin) {
 }
 
 async function payCheckout(req, res, next) {
+  console.log(`[payCheckout] Iniciando cobro para ref: ${req.params.external_reference}`);
   try {
     const externalReference = decodeURIComponent(req.params.external_reference);
     const parsed = PayBodySchema.safeParse(req.body);
@@ -403,7 +417,6 @@ async function payCheckout(req, res, next) {
 
     const initialCardToken = card_id || mp_card_token || token;
     if (!initialCardToken) return res.status(400).json({ error: "Token or Card ID required" });
-    console.log("back_url", back_url);
     const result = await withTransaction(async (tx) => {
 
       const headerKey = req.headers["x-idempotency-key"];
@@ -466,34 +479,77 @@ async function payCheckout(req, res, next) {
   } */
 
 
-      
+      const isSavedCard = !!card_id;
+      let tokenForPayment = null;
+
+      if (isSavedCard) {
+          // Pagando con Tarjeta Guardada: Necesitamos CVV fresco
+          console.log("💳 [TOKEN] Generando token fresco desde Card ID...");
+          tokenForPayment = await getFreshToken(card_id, security_code);
+          if (!tokenForPayment) {
+              const err = new Error("No se pudo generar el token de seguridad (CVV) para la tarjeta guardada.");
+              err.status = 400;
+              throw err;
+          }
+      } else {
+          // Pagando con Tarjeta Nueva: Usamos el token directo
+          console.log("💳 [TOKEN] Usando token de nueva tarjeta.");
+          tokenForPayment = mp_card_token || token;
+      }
+
       const isSubscription = (orderRow.type === 'subscription' || !!preapproval_plan_id || !!orderRow.mp_preapproval_plan_id);
       const shouldSaveCard = save_card || isSubscription;
+      const planIdToUse = preapproval_plan_id || orderRow.mp_preapproval_plan_id;
+      const strategy = isSubscription ? 'subscription' : 'one_time';
+      /* console.log("🚀 [TRACK 5] Enviando a Pago. Token/CardID final:", freshToken ? freshToken.substring(0, 10) + "..." : "NULL"); */
 
-      let tokenForPayment = initialCardToken;
+      console.log("🔍 [DEBUG PRE-TRANSACCION]:", {
+          strategy,
+          amount: orderRow.total_amount,
+          token: tokenForPayment ? tokenForPayment.substring(0, 10) + "..." : "MISSING",
+          methodId: finalMethodId,
+          hasPayer: !!payer,
+          payerEmail: payer?.email
+      });
 
-      console.log("shouldSaveCard", shouldSaveCard);
-      console.log("mpCustomerId", mpCustomerId);
+      // --- 2. 🔥 PRIMERO COBRAMOS 🔥 ---
+      console.log(`[transactionResult] Enviando transacción (Estrategia: ${strategy}) con método: ${finalMethodId}...`);
+      const transactionResult = await executeMpTransaction(strategy, {
+          planId: planIdToUse,
+          token: tokenForPayment,
+          amount: Number(orderRow.total_amount),
+          email: payer.email,
+          customerId: isSavedCard ? mpCustomerId : null,
+          userId: user.id,
+          merchantId: orderRow.merchant_id,
+          ref: orderRow.external_reference,
+          methodId: finalMethodId,
+          installments,
+          issuerId: issuer_id,
+          description: description || `Checkout ${orderRow.external_reference}`,
+          idempotencyKey: idempotency_key || req.headers["x-idempotency-key"],
+          backUrl: orderRow.back_url,
+          order_id: orderRow.order_id,
+        });
 
-      if (shouldSaveCard && mpCustomerId && !mpCustomerId.startsWith('bypass_')) {
+      /* let tokenForPayment = initialCardToken; */
+      const txStatus = transactionResult.status;
+      console.log(`[txStatus Respuesta síncrona: ${txStatus} (MP ID: ${transactionResult.id})`);
+      const isRejected = txStatus === 'rejected' || txStatus === 'cancelled';
+
+      if (!isRejected && shouldSaveCard && mpCustomerId && !mpCustomerId.startsWith('bypass_') && !isSavedCard) {
           try {
-              console.log("🔥 [Vault] Guardando tarjeta (Estrategia NULL)...");
-              
-              console.log("freshToken", tokenForPayment);
-              // 2. Aquí agregamos el null
-              console.log("mpCustomerId en createCustomerCards", mpCustomerId);
-              console.log("initialCardToken en createCustomerCards", initialCardToken);
-              const savedCard = await createCustomerCards(mpCustomerId, initialCardToken);
+            console.log("mp_registration_token", mp_registration_token);
+              const vaultToken = mp_registration_token || initialCardToken;
+              console.log("[vaultToken] Cobro exitoso. Guardando la tarjeta...");
+
+              const savedCard = await createCustomerCards(mpCustomerId, vaultToken);
               console.log("savedCard", savedCard);
 
               const realCardId = (savedCard && savedCard.id) ? savedCard.id : savedCard;
               
               if (realCardId) {
                   console.log(`✅ [Vault] Éxito. Nuevo Card ID: ${realCardId}`);
-                  
-                  // 🔄 ACTUALIZAMOS: Ahora sí, para el PAGO usamos el ID de la tarjeta guardada
-                  tokenForPayment = realCardId; 
-
                   try {
                       console.log("💾 Registrando instrumento en DB local...");
                       // Asegúrate de tener acceso a 'orderRow' (de donde sacas el user_id)
@@ -516,12 +572,13 @@ async function payCheckout(req, res, next) {
                   }
               }
           } catch (e) {
-              console.error("❌ [Vault Error]:", e.message);
-              if (isSubscription) throw e; 
+              /* console.error("❌ [Vault Error]:", e.message); */
+              console.error("⚠️ Error guardando tarjeta (pero el cobro fue exitoso):", e.response?.data || e.message);
+              /* if (isSubscription) throw e; */ 
           }
       }
 
-          const freshToken = await getFreshToken(initialCardToken, security_code);
+          /* const freshToken = await getFreshToken(initialCardToken, security_code); */
 
   /*     console.log("🛑 [TEST] Deteniendo ejecución antes del pago.");
       return {
@@ -540,34 +597,15 @@ async function payCheckout(req, res, next) {
       : 'one_time'; */
       
       
-      const planIdToUse = preapproval_plan_id || orderRow.mp_preapproval_plan_id;
-      const strategy = isSubscription ? 'subscription' : 'one_time';
-
-      console.log("🚀 [TRACK 5] Enviando a Pago. Token/CardID final:", freshToken ? freshToken.substring(0, 10) + "..." : "NULL");
-
-
-      const transactionResult = await executeMpTransaction(strategy, {
-          planId: planIdToUse,
-          token: freshToken,
-          amount: Number(orderRow.total_amount),
-          email: payer.email,
-          customerId: mpCustomerId,
-          userId: user.id,
-          ref: orderRow.external_reference,
-          methodId: finalMethodId,
-          installments,
-          issuerId: issuer_id,
-          description: description || `Checkout ${orderRow.external_reference}`,
-          idempotencyKey: idempotency_key || req.headers["x-idempotency-key"],
-          backUrl: orderRow.back_url
-        });
+      
 
         // PASO G: Guardar en Base de Datos
         const payloadLog = preapproval_plan_id 
-            ? { plan_id: preapproval_plan_id, card: freshToken } 
-            : { token: freshToken, method: finalMethodId };
+            ? { plan_id: preapproval_plan_id, card: tokenForPayment } 
+            : { token: tokenForPayment, method: finalMethodId };
 
         await persistTransactionResult(tx, orderRow, transactionResult, payloadLog, idempotencyKey);
+        console.log(`[persistTransactionResult] Orden guardada en PENDING esperando Webhook asíncrono.`);
 
         /* console.log("🛑 [TEST WEBHOOK] Hemos cobrado, pero NO guardaremos el resultado en la DB. Esperando al Webhook..."); */
 
@@ -576,9 +614,31 @@ async function payCheckout(req, res, next) {
 
         return {
           transactionResult,
-          backUrl: finalBackUrl
+          isRejected,
+          backUrl: finalBackUrl,
+          order_id: orderRow.order_id,
       };
     });
+
+    console.log("result.transactionResult", result.transactionResult);
+
+    const txStatus = result.transactionResult.status;
+    const isRejected = result.isRejected;
+
+    // Si es rechazado, devolvemos HTTP 400 y ok: false
+    if (isRejected) {
+      return res.status(400).json({
+        ok: false,
+        error: "Pago rechazado",
+        code: result.transactionResult.status_detail, 
+        payment: {
+          id: result.transactionResult.id,
+          status: txStatus,
+          status_detail: result.transactionResult.status_detail,
+          type: result.transactionResult.payment_type_id
+        }
+      });
+    }
 
     return res.status(201).json({
       ok: true,
@@ -586,44 +646,42 @@ async function payCheckout(req, res, next) {
         id: result.transactionResult.id,
         status: result.transactionResult.status,
         status_detail: result.transactionResult.status_detail,
-        type: result.transactionResult.payment_type_id
+        type: result.transactionResult.payment_type_id,
+        external_reference: externalReference
       },
       back_url: result.backUrl
     });
   } catch (e) {
-    console.error("❌ Error en payCheckout:", e.message);
+    console.error("❌ [PAY_CHECKOUT_ERROR]:", e.response?.data || e.message);
 
-    // 1. Errores de Mercado Pago (Tarjetas rechazadas, datos inválidos)
-    // Suelen venir con un 'status' (ej: 400) o un array 'cause'.
-    if (e.status === 400 || (e.response && e.response.status === 400)) {
-        
-        const mpError = e.response ? e.response.data : e;
-        const cause = mpError.cause && mpError.cause.length > 0 ? mpError.cause[0] : null;
+    let statusCode = 500;
+    let errorCode = "server_error";
+    let errorMessage = "Ocurrió un error interno en el servidor.";
 
-        // Extraemos el código técnico (ej: "205", "301", "cc_rejected_...")
-        const errorCode = cause?.code || mpError.error || "bad_request";
-        const errorMessage = cause?.description || mpError.message || "Datos inválidos.";
+    if (e.response?.data || e.payload) {
+        const mpError = e.response?.data || e.payload;
+        const cause = mpError.cause?.[0]; // MP suele enviar los detalles en un array 'cause'
 
-        return res.status(400).json({
-            ok: false,
-            error: "Error en los datos de pago",
-            code: errorCode,  
-            details: errorMessage
-        });
+        statusCode = e.response?.status || e.status || 400;
+        errorCode = cause?.code || mpError.status_detail || mpError.error || mpError.status || "mp_api_error";
+        errorMessage = cause?.description || mpError.message || "Error al comunicarse con Mercado Pago.";
+
+    } else if (e.status && e.status !== 500) {
+        statusCode = e.status;
+        errorCode = "internal_validation";
+        errorMessage = e.message;
+
+    } else if (e.name === 'ZodError') {
+        statusCode = 400;
+        errorCode = "invalid_payload";
+        errorMessage = "Los datos enviados no tienen el formato correcto.";
     }
 
-    // 2. Errores de Validación Interna (Zod, Tokens faltantes)
-    if (e.status === 400) {
-        return res.status(400).json({ ok: false, error: e.message });
-    }
-
-    // 3. Error desconocido (Base de datos caída, bug de código) -> 500
-    // Aquí sí usamos next(e) para que tu manejador de errores global lo registre
-    // O devolvemos un 500 manual:
-    return res.status(500).json({ 
+    return res.status(statusCode).json({ 
         ok: false, 
-        error: "Ocurrió un error interno en el servidor. Intenta más tarde.",
-        details: e.message
+        error: "Error en la transacción",
+        code: String(errorCode), 
+        details: errorMessage
     });
   }
 }

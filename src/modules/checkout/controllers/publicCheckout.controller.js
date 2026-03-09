@@ -3,6 +3,7 @@ const mpRepo = require("../repos/mpCustomers.repo");
 const { ensureMpCustomer } = require("./publicPayment.controller");
 
 exports.getCheckout = async (req, res, next) => {
+  console.log(`[getCheckout] Frontend cargando checkout para ref: ${req.params.external_reference}`);
   try {
     const ref = req.params.external_reference;
 
@@ -28,7 +29,7 @@ exports.getCheckout = async (req, res, next) => {
         ? process.env.MP_PUBLIC_KEY_SUBSCRIPTIONS 
         : process.env.MP_PUBLIC_KEY;
 
-        console.log(`🔑 Checkout cargado. Tipo: ${isSubscription ? 'Suscripción' : 'Pago Único'}. Key usada: ${publicKeyToUse}`);
+        console.log(`[isSubscription] Tipo: ${isSubscription ? 'Suscripción' : 'Pago Único'}. Key usada: ${publicKeyToUse}`);
 
     return res.json({
       mp_public_key: publicKeyToUse,
@@ -60,6 +61,7 @@ exports.getCheckout = async (req, res, next) => {
         qty: i.qty,
         unit_price: i.unit_price,
         line_total: i.line_total,
+        description: i.description
       })),
     });
   } catch (e) {

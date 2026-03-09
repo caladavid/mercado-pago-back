@@ -5,10 +5,13 @@ const repo = require("../repos/checkout.repo");
 const mpRepo = require("../repos/mpCustomers.repo");
 
 exports.createCheckout = async (req, res, next) => {
+  console.log(`[createCheckout] Iniciando orden para: ${req.body?.buyer?.email} | SKU: ${req.body?.item?.sku}`);
   try {
     // Por seguridad, el slug debe venir del token validado por merchantAuth
     const merchantSlug = req.merchant?.slug;
-    if (!merchantSlug) return res.status(401).json({ error: "merchant not authenticated" });
+    const merchantId = req.merchant?.id;
+    if (!merchantSlug || !merchantId) return res.status(401).json({ error: "merchant not authenticated" });
+
 
     const { buyer, item, type, preapproval_plan_id, back_url } = req.body || {};
 
@@ -21,15 +24,12 @@ exports.createCheckout = async (req, res, next) => {
       let localPlanId = null;
 
       if (type === 'subscription' && preapproval_plan_id) {
-        // ... (tu lógica de búsqueda actual) ...
         const planQuery = `SELECT id FROM plans WHERE mp_preapproval_plan_id = $1`;
         const { rows } = await client.query(planQuery, [preapproval_plan_id]);
 
         if (rows.length > 0) {
-          localPlanId = rows[0].id; // <--- GUARDAMOS EL UUID ENCONTRADO (bb06...)
+          localPlanId = rows[0].id; 
           console.log("✅ Plan Local Encontrado (UUID):", localPlanId);
-        } else {
-           // Manejo de error si no existe
         }
       }
 
@@ -53,12 +53,14 @@ exports.createCheckout = async (req, res, next) => {
         name: item.title,
         price: Number(item.amount),
         currency: item.currency,
+        description: item.description,
       });
 
       console.log("👉 [CreateCheckout] Plan ID capturado:", preapproval_plan_id);
 
       const order = await repo.createOrder(client, {
         userId: user.id,
+        merchantId,
         totalAmount: Number(item.amount),
         currency: item.currency,
         merchantSlug,
@@ -79,6 +81,8 @@ exports.createCheckout = async (req, res, next) => {
 
     const base = process.env.PUBLIC_CHECKOUT_BASE_URL || `${req.protocol}://${req.get("host")}`;
     const checkoutUrl = `${base}/checkout/${encodeURIComponent(result.order.external_reference)}`;
+
+    console.log(`[createCheckout] Orden generada: ${result.order.external_reference}`);
 
     return res.status(201).json({
       order_id: result.order.id,

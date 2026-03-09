@@ -31,7 +31,8 @@ async function getCheckoutByExternalReference(externalReference) {
       oi.unit_price,
       oi.line_total,
       p.sku,
-      p.name
+      p.name,
+      p.description
     FROM order_items oi
     JOIN products p ON p.id = oi.product_id
     WHERE oi.order_id = $1
