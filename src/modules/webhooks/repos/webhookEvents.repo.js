@@ -38,6 +38,7 @@ async function updateOrderStatusByPaymentId(externalReference, mpStatus, payment
   const nextOrderStatus = (() => {
       if (mpStatus === "approved") return "paid";
       if (mpStatus === "rejected") return "failed";
+      if (mpStatus === "authorized") return "authorized";
       if (mpStatus === "refunded") return "refunded";
       if (mpStatus === "charged_back") return "disputed";
       if (mpStatus === "cancelled") return "cancelled";
@@ -51,9 +52,12 @@ async function updateOrderStatusByPaymentId(externalReference, mpStatus, payment
       status = $1, 
       mp_payment_id = COALESCE($3, mp_payment_id),
       updated_at = NOW()  
-    WHERE external_reference = $2  
+    WHERE (
+      external_reference = $2 
+      OR external_reference = REPLACE($2, 'comerciante-contenido:', '')
+    ) 
     AND status != $1
-    RETURNING id, external_reference, user_id, total_amount, currency  
+    RETURNING id, external_reference, user_id, total_amount, currency, status  
   `;
 
 /* 
@@ -77,6 +81,13 @@ async function updateOrderStatusByPaymentId(externalReference, mpStatus, payment
       externalReference,
       paymentId ? String(paymentId) : null
   ]); 
+
+  if (rows.length > 0) {
+      console.log("Orden", rows[0]);
+      console.log(`✅ DB ACTUALIZADA: Orden ${rows[0].id} pasó a estado: ${rows[0].status}`);
+    } else {
+      console.warn(`⚠️ ADVERTENCIA: No se encontró la orden con ref: ${externalReference}. Revisa si el UUID existe en la tabla orders.`);
+    }
 
     return rows[0];
   } catch (error) {
@@ -129,11 +140,17 @@ async function syncSubscription(mpSubscription) {
     // -----------------------------------------------------------
     // 👤 PASO 2: RECUPERAR EL USUARIO
     // -----------------------------------------------------------
-    let userId = mpSubscription.external_reference;
+    let rawUserId = mpSubscription.external_reference;
 
     // Si external_reference falló, miramos metadata
-    if (!userId && mpSubscription.metadata && mpSubscription.metadata.user_id) {
-        userId = mpSubscription.metadata.user_id;
+    if (!rawUserId && mpSubscription.metadata && mpSubscription.metadata.user_id) {
+        rawUserId = mpSubscription.metadata.user_id;
+    }
+
+    // Limpiamos el ID (quitamos el prefijo 'comerciante-contenido:' si existe)
+    let userId = rawUserId;
+    if (rawUserId && rawUserId.includes(':')) {
+        userId = rawUserId.split(':')[1]; 
     }
 
     // Si todo falla, miramos email
