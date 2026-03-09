@@ -1,3 +1,4 @@
+const { pool } = require("../../../db/pool");
 const { withTransaction } = require("../../../shared/db/withTransaction");
 
 /**
@@ -6,6 +7,7 @@ const { withTransaction } = require("../../../shared/db/withTransaction");
  */
 async function createSubscription({ 
     userId, 
+    merchantId,
     planId, 
     mpSubscription, 
     reason, 
@@ -21,8 +23,8 @@ async function createSubscription({
         console.log("--------------------------------------------------");
         console.log("🕵️‍♂️ DEBUG REPO - Intentando Insertar Suscripción:");
         console.log("   👉 User ID:", userId);
+        console.log("   👉 Merchant ID:", merchantId);
         console.log("   👉 Plan ID:", planId); // ¿Es null o tiene numero?
-        console.log("   👉 Status:", "pending"); // Asumo que es pending
         console.log("--------------------------------------------------");
         
         // A) Insertar Subscription
@@ -30,6 +32,7 @@ async function createSubscription({
             INSERT INTO subscriptions 
             (
                 user_id, 
+                merchant_id,
                 plan_id, 
                 mp_preapproval_id, 
                 status, 
@@ -44,12 +47,13 @@ async function createSubscription({
                 created_at,
                 updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
             RETURNING id, init_point
         `;
 
         const subValues = [
             userId,
+            merchantId,
             planId,
             mpSubscription.id,
             mpSubscription.status,
@@ -115,6 +119,20 @@ async function createSubscription({
 }
 
 /**
+ * Busca una suscripción por su ID de Mercado Pago para validar propiedad.
+ */
+async function getSubscriptionByMPId(subscriptionId) {
+    const query = `
+        SELECT id, user_id, merchant_id, status 
+        FROM subscriptions 
+        WHERE mp_preapproval_id = $1 
+        LIMIT 1
+    `;
+    const { rows } = await pool.query(query, [subscriptionId]);
+    return rows[0] || null;
+}
+
+/**
  * Actualiza el estado de una suscripción y registra el evento del cambio.
  */
 async function updateStatus(mpPreapprovalId, newStatus, rawPayload = null) {
@@ -155,4 +173,29 @@ async function updateStatus(mpPreapprovalId, newStatus, rawPayload = null) {
     });
 }
 
-module.exports = { createSubscription, updateStatus };
+/**
+ * Actualiza la fecha del próximo cobro de una suscripción.
+ * Esto empuja el "vencimiento" hacia el futuro tras un pago exitoso.
+ */
+async function updateNextBillingDate(mpPreapprovalId, nextPaymentDate) {
+    const query = `
+        UPDATE subscriptions 
+        SET 
+            next_billing_at = $1,
+            updated_at = NOW()
+        WHERE mp_preapproval_id = $2
+        RETURNING id;
+    `;
+
+    const values = [nextPaymentDate, String(mpPreapprovalId)];
+
+    try {
+        const { rows } = await pool.query(query, values);
+        return rows[0]; // Retorna el ID si se actualizó correctamente
+    } catch (error) {
+        console.error("💥 [Repo] Error actualizando next_billing_date:", error.message);
+        throw error;
+    }
+}
+
+module.exports = { createSubscription, getSubscriptionByMPId, updateStatus, updateNextBillingDate };

@@ -9,7 +9,8 @@ async function processSubscriptionLogic(data) {
         card_token_id, 
         user_id, 
         external_reference,
-        back_url 
+        back_url,
+        merchant_id
     } = data;
 
     if (!preapproval_plan_id) throw new Error("Falta el preapproval_plan_id.");
@@ -30,8 +31,7 @@ async function processSubscriptionLogic(data) {
         external_reference: external_reference,
     };
 
-    console.log("📦 [Logic] Creando suscripción en MP...", JSON.stringify(mpPayload, null, 2));
-    console.log("📦 [Logic] Creando suscripción en MP...", JSON.stringify(mpPayload, null, 2));
+    console.log("[processSubscriptionLogic] Creando suscripción en MP:", JSON.stringify(mpPayload, null, 2));
 
     // 3. Llamada a Mercado Pago
     const mpSubscription = await mpClient.createPreApproval(mpPayload);
@@ -39,6 +39,7 @@ async function processSubscriptionLogic(data) {
     // 4. Guardar en Base de Datos Local
     const savedSub = await repo.createSubscription({
         userId: user_id,
+        merchantId: merchant_id,
         planId: localPlan.id,
         mpSubscription: mpSubscription,
         reason: localPlan.name,
@@ -150,6 +151,7 @@ async function createSubscriptionFromPlan(req, res, next) {
         // Adaptamos req.body al formato que espera la lógica
         const result = await processSubscriptionLogic({
             ...req.body,
+            merchant_id: req.merchant.id,
             external_reference: req.body.user_id ? req.body.user_id.toString() : "SIN_ID"
         });
 
@@ -167,6 +169,43 @@ async function createSubscriptionFromPlan(req, res, next) {
 }
 
 async function cancelSubscription(req, res, next) {
+    try {
+        const { subscriptionId } = req.params;
+        const authenticatedMerchantId = req.merchant?.id;
+
+        const subscription = await repo.getSubscriptionByMPId(subscriptionId);
+
+        if (!subscription) {
+            return res.status(404).json({ ok: false, error: "Suscripción no encontrada en la base de datos." });
+        }
+
+        if (subscription.merchant_id !== authenticatedMerchantId) {
+            return res.status(403).json({ ok: false, error: "Acceso denegado. No tienes permiso para cancelar esta suscripción." });
+        }
+
+        const mpResult = await mpClient.cancelPreApproval(subscriptionId).catch(err => {
+        if (err.status === 400 && err.payload?.message?.includes("cancelled")) {
+            // Retornamos un objeto bandera si ya estaba cancelada, para no romper el flujo
+            return { alreadyCancelled: true }; 
+        }
+        throw err; // Si es un error real (ej. 500, o token inválido), lo lanzamos al catch principal
+        });
+
+        const rawPayload = mpResult.alreadyCancelled ? null : mpResult;
+        await repo.updateStatus(subscriptionId, "cancelled", rawPayload);
+
+        const message = mpResult.alreadyCancelled 
+            ? "La suscripción ya estaba cancelada en MP." 
+            : "Suscripción cancelada exitosamente.";
+
+        return res.json({ ok: true, message });
+
+    } catch (error) {
+        next(error);
+    }
+}
+
+/* async function cancelSubscription(req, res, next) {
     try {
     const { subscriptionId } = req.params;
 
@@ -191,6 +230,6 @@ async function cancelSubscription(req, res, next) {
   } catch (error) {
     next(error);
   }
-}
+} */
 
 module.exports = { createAdHocSubscription, createSubscriptionFromPlan, processSubscriptionLogic, cancelSubscription };

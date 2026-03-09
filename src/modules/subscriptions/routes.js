@@ -10,8 +10,8 @@ const router = express.Router();
 router.post("/ad-hoc", controller.createAdHocSubscription);
 
 // Opción B: Rígida, basada en plan pre-creado en MP
-router.post("/plan", controller.createSubscriptionFromPlan);
+router.post("/plan", merchantAuth, controller.createSubscriptionFromPlan);
 
-router.put("/:subscriptionId/cancel", controller.cancelSubscription);
+router.put("/:subscriptionId/cancel", merchantAuth, controller.cancelSubscription);
 
 module.exports = router;
