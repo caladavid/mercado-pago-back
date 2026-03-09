@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "outDir": "./dist",            // Donde irá el código compilado
+    "rootDir": "./src",           // Donde pondrás tus archivos .ts
+    "strict": true,               // Seguridad máxima
+    "esModuleInterop": true,      // Para que import/require se lleven bien
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowJs": true               // 🚩 CLAVE: Permite que existan archivos .js y .ts juntos
+  },
+  "include": ["src/**/*", "tsconfig.json"],
+  "exclude": ["node_modules", "dist"]
+}

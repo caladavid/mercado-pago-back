@@ -1,6 +1,9 @@
 const express = require("express");
 const rateLimit = require("express-rate-limit");
 const { merchantAuth } = require("../middlewares/merchantAuth");
+const subscriptionRoutes = require("../modules/subscriptions/routes");
+const planRoutes = require("../modules/plans/routes");
+const orderRoutes = require("../modules/orders/routes");
 
 const router = express.Router();
 
@@ -12,6 +15,10 @@ const limiter = rateLimit({
 });
 
 router.use(limiter);
+
+router.use("/subscriptions", subscriptionRoutes);
+router.use('/plans', planRoutes);
+router.use('/orders', orderRoutes);
 
 // Ejemplo: POST /api/ping (merchant)
 router.post("/ping", merchantAuth, (req, res) => {

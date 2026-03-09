@@ -1,16 +1,20 @@
 const { PreApproval, default: MercadoPagoConfig, PreApprovalPlan } = require("mercadopago");
-
+const config = require("../../config/env");
 // src/integrations/mercadopago/mpClient.js
 const BASE_URL = "https://api.mercadopago.com";
 
 const fetchFn = global.fetch ? global.fetch.bind(global) : require("node-fetch");
 
 function getTokenOrThrow(isSubscription = false) {
-  const token = isSubscription 
-        ? process.env.MP_ACCESS_TOKEN2
-        : process.env.MP_ACCESS_TOKEN;
+
+  /* const token = isSubscription 
+        ? config.mpSubscriptionAccessToken
+        : config.mpAccessToken; */
+
+  const token = config.mpSubscriptionAccessToken;
+
   if (!token) {
-    const err = new Error("MercadoPago access token missing: set MP_ACCESS_TOKEN env");
+    const err = new Error("MercadoPago access token missing in environment variables.");
     err.status = 500;
     throw err;
   }
@@ -44,6 +48,8 @@ function mpHeaders({ idempotencyKey, isSubscription = false } = {}) {
   // Log seguro (sin token completo)
   const prefix = token.slice(0, 12);
   /* console.log("MP token prefix:", prefix, "len:", token.length); */
+
+  console.log(`🕵️‍♂️ [AUTH CHECK] Armando request con Token: ${token.slice(0, 15)}... | isSubscription: ${isSubscription}`)
 
   return headers;
 }
@@ -105,10 +111,8 @@ async function searchCustomerByEmail(email) {
   const q = encodeURIComponent(email);
   
   try {
-    // Usamos el mpRequest que ya tienes definido
     const response = await mpRequest("GET", `/v1/customers/search?email=${q}`);
     
-    // Mercado Pago devuelve { results: [...] }
     if (response && response.results && response.results.length > 0) {
       return response; // Devolvemos el objeto completo para mantener compatibilidad
     }
@@ -153,7 +157,7 @@ async function createSubscriptionCustomer(
     "POST",
     "/v1/customers",
     { email, first_name, last_name, identification, metadata },
-    { idempotencyKey, isSubscription: false } // <--- Usa el Token 2
+    { idempotencyKey, isSubscription: false } 
   );
 }
 
@@ -167,7 +171,7 @@ async function saveCardToCustomer(customerId, token) {
 }
 
 // POST /v1/payments
-async function createPayment(
+/* async function createPayment(
   {
     token,
     transaction_amount,
@@ -199,7 +203,61 @@ async function createPayment(
     },
     { idempotencyKey }
   );
+} */
+async function createPayment(
+  {
+    token,
+    transaction_amount,
+    description,
+    installments,
+    payment_method_id,
+    payer,
+    currency_id,
+    external_reference,
+  },
+  { idempotencyKey } = {}
+) {
+  if (currency_id) {
+    const err = new Error("currency_id is not supported in this payment request");
+    err.status = 400;
+    throw err;
+  }
+
+  // --- 🔍 DEBUG START ---
+  console.log("%c🚀 [MP-CLIENT] Enviando Pago a /v1/payments", "color: #009ee3; font-weight: bold;");
+  
+  const payload = {
+    token,
+    transaction_amount,
+    description,
+    installments,
+    payment_method_id,
+    payer,
+    external_reference,
+  };
+
+  console.log("📦 Body enviado:", JSON.stringify(payload, null, 2));
+  console.log("🔑 Idempotency Key:", idempotencyKey || "No enviada");
+  // --- 🔍 DEBUG END ---
+
+  try {
+    const result = await mpRequest(
+      "POST",
+      "/v1/payments",
+      payload,
+      { idempotencyKey }
+    );
+
+    console.log("✅ [MP-CLIENT] Respuesta Exitosa:", result.id, result.status);
+    return result;
+
+  } catch (error) {
+    // El error 500 ya se imprime en mpRequest, pero aquí capturamos el contexto
+    console.error("❌ [MP-CLIENT] Falló la creación del pago.");
+    throw error;
+  }
 }
+
 
 // GET /v1/payment_methods/search?bin=...
 async function searchPaymentMethodsByBin(bin) {
@@ -253,12 +311,11 @@ async function getChargeback(chargebackId) {
   return mpRequest("GET", `/v1/chargebacks/${chargebackId}`);
 }
 
-const client = new MercadoPagoConfig({ 
+/* const client = new MercadoPagoConfig({ 
     accessToken: process.env.MP_ACCESS_TOKEN2
-});
+}); */
 
-async function createPreApproval(payload) {
-  // 💡 TIP DE ORO: Agrega un log para ver con qué token estás intentando autorizar
+/* async function createPreApproval(payload) {
   const tokenHint = process.env.MP_ACCESS_TOKEN2 ? process.env.MP_ACCESS_TOKEN2.substring(0, 15) : 'NULL';
   console.log(`[MP] Intentando crear suscripción con Token: ${tokenHint}...`);
 
@@ -269,17 +326,15 @@ async function createPreApproval(payload) {
       body: payload
     });
   } catch (error) {
-    // 🛑 AQUÍ ESTABA EL "UNDEFINED":
     console.error("❌ ERROR EN SUSCRIPCIÓN (RAW):", JSON.stringify(error, null, 2)); 
     
-    // A veces el error real está en error.cause o error.response.data
     if (error.cause) console.error("❌ CAUSA:", JSON.stringify(error.cause, null, 2));
     
     throw error;
   }
-}
+} */
 
-async function createPreApprovalPlan(planData) {
+/* async function createPreApprovalPlan(planData) {
   const preapprovalPlan = new PreApprovalPlan(client);
 
   try {
@@ -290,6 +345,30 @@ async function createPreApprovalPlan(planData) {
     console.error("❌ ERROR al crear Plan:", JSON.stringify(error, null, 2));
     throw error;
   }
+} */
+
+// POST /preapproval
+async function createPreApproval(payload) {
+  console.log(`[MP] Intentando crear suscripción via API nativa...`);
+
+  return mpRequest(
+    "POST",
+    "/preapproval",
+    payload,
+    { isSubscription: true }
+  );
+}
+
+// POST /preapproval_plan
+async function createPreApprovalPlan(planData) {
+  console.log(`[MP] Intentando crear Plan de Suscripción via API nativa...`);
+
+  return mpRequest(
+    "POST",
+    "/preapproval_plan",
+    planData,
+    { isSubscription: true }
+  );
 }
 
 // GET v1/customers/{id}/cards
@@ -337,6 +416,7 @@ async function deleteCustomerCards(customerId, cardId) {
 
 // DELETE v1/customers/{customer_id}/cards/{id}
 async function createTokenFromCardId(cardId, securityCode = null) {
+  
   const body = { 
     card_id: cardId 
   };
@@ -346,6 +426,7 @@ async function createTokenFromCardId(cardId, securityCode = null) {
     body.security_code = securityCode; 
   }
 
+  console.log(`🔑 [createTokenFromCardId] URL: /v1/card_tokens, body: { card_id, security_code }`);
   return mpRequest("POST", "/v1/card_tokens", body);
 }
 

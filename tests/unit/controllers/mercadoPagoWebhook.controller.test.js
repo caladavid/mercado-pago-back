@@ -69,7 +69,7 @@ describe('mercadoPagoWebhook.controller - receiveMercadoPagoWebhook', () => {
       };
       mockReq.body = webhookPayload;
 
-      await receiveMercadoPagoWebhook(mockReq, mockRes, mockNext);
+      await (mockReq, mockRes, mockNext);
 
       expect(repo.insertWebhookEvent).toHaveBeenCalledWith(expect.objectContaining({
         dataId: 'pay_123456',

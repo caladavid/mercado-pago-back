@@ -13,8 +13,11 @@
     "test:mpclient": "jest tests/unit/integrations/mpClient.test.js",
     "test:shared": "jest tests/unit/shared",
     "test:repos": "jest tests/unit/repos",
+    "build": "tsc",
     "dev": "nodemon src/server.js",
-    "start": "node src/server.js"
+    "dev-ts": "tsc-watch --onSuccess \"node dist/server.js\"",
+    "start": "node src/server.js",
+    "start-ts": "node dist/server.js"
   },
   "jest": {
     "testEnvironment": "node",
@@ -43,6 +46,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "axios": "^1.13.6",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
@@ -56,9 +60,15 @@
     "zod": "^4.2.1"
   },
   "devDependencies": {
+    "@types/axios": "^0.9.36",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
+    "@types/node": "^25.3.3",
     "jest": "^30.2.0",
     "nodemon": "^3.1.11",
-    "supertest": "^7.2.2"
+    "supertest": "^7.2.2",
+    "tsc-watch": "^7.2.0",
+    "typescript": "^5.9.3"
   }
 }

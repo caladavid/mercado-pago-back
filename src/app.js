@@ -20,8 +20,8 @@ app.get("/health", (req, res) => res.json({ ok: true }));
 
 app.use("/admin", adminRoutes);
 app.use("/api", merchantRoutes);
-app.use("/api/subscriptions", subscriptionRoutes);
-app.use('/api/plans', planRoutes);
+/* app.use("/api/subscriptions", subscriptionRoutes);
+app.use('/api/plans', planRoutes); */
 
 app.post("/webhooks/test", (req, res) => {
     console.log("🚀 DEBUG: Webhook Directo Recibido!");
