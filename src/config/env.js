@@ -31,7 +31,7 @@ module.exports = {
         : process.env.MP_ACCESS_TOKEN_PROD,
 
     mpPublicKey: isDev 
-        ? process.env.MP_PUBLIC_KEY_DEV 
+        ? process.env.MP_PUBLIC_KEY 
         : process.env.MP_PUBLIC_KEY_PROD,
 
     port: process.env.PORT || 3001,
