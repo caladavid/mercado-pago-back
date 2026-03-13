@@ -1,6 +1,7 @@
 const mpClient = require("../../../integrations/mercadopago/mpClient");
 const { pool } = require("../../../db/pool");
 const repo = require("../repos/subscriptions.repo");
+const config = require("../../../config/env");
 
 async function processSubscriptionLogic(data) {
     const { 
@@ -46,7 +47,7 @@ async function processSubscriptionLogic(data) {
         amount: localPlan.amount,
         frequency: localPlan.interval_count,
         frequencyType: localPlan.interval_unit,
-        currency: "UYU",
+        currency: config.isDev ? "UYU" : "CLP",
         discountAmount: 0 // Simplificado para este ejemplo
     });
 
@@ -106,7 +107,7 @@ async function createAdHocSubscription(req, res, next) {
                 frequency: parseInt(frequency),           
                 frequency_type: frequency_type,           
                 transaction_amount: finalAmount,
-                currency_id: "UYU"
+                currency_id: config.isDev ? "UYU" : "CLP"
             },
             status: "pending"
         }
@@ -122,7 +123,7 @@ async function createAdHocSubscription(req, res, next) {
             amount: finalAmount,
             frequency: parseInt(frequency),
             frequencyType: frequency_type,
-            currency: "UYU",
+            currency: config.isDev ? "UYU" : "CLP",
             couponId: couponData?.id,
             discountAmount: couponData ? (originalAmount - finalAmount) : 0
         })
@@ -170,27 +171,40 @@ async function createSubscriptionFromPlan(req, res, next) {
 
 async function cancelSubscription(req, res, next) {
     try {
-        const { subscriptionId } = req.params;
+        const { subscriptionId } = req.params; // Este debe ser el ID de MP (ej. 2c9380...) o el ID interno de tu DB, según cómo armes la ruta
         const authenticatedMerchantId = req.merchant?.id;
 
+        // 1. Validar autenticación del Merchant
+        if (!authenticatedMerchantId) {
+            return res.status(401).json({ ok: false, error: "No autorizado." });
+        }
+
+        console.log(`📍 [CancelSub IN] Merchant ${authenticatedMerchantId} intentando cancelar Sub ID: ${subscriptionId}`);
+
+        // 2. Buscar la suscripción en la DB (Tu función espera el ID de MP)
         const subscription = await repo.getSubscriptionByMPId(subscriptionId);
 
         if (!subscription) {
             return res.status(404).json({ ok: false, error: "Suscripción no encontrada en la base de datos." });
         }
 
+        // 3. Validar que la suscripción pertenezca a este Merchant
         if (subscription.merchant_id !== authenticatedMerchantId) {
             return res.status(403).json({ ok: false, error: "Acceso denegado. No tienes permiso para cancelar esta suscripción." });
         }
 
+        // 4. Cancelar en Mercado Pago
+        console.log(`📡 [CancelSub MP] Llamando a Mercado Pago para cancelar...`);
         const mpResult = await mpClient.cancelPreApproval(subscriptionId).catch(err => {
-        if (err.status === 400 && err.payload?.message?.includes("cancelled")) {
-            // Retornamos un objeto bandera si ya estaba cancelada, para no romper el flujo
-            return { alreadyCancelled: true }; 
-        }
-        throw err; // Si es un error real (ej. 500, o token inválido), lo lanzamos al catch principal
+            // Manejamos si ya estaba cancelada en MP
+            if (err.status === 400 && err.payload?.message?.includes("cancelled")) {
+                console.log(`⚠️ [CancelSub MP] La suscripción ya estaba cancelada en Mercado Pago.`);
+                return { alreadyCancelled: true }; 
+            }
+            throw err; 
         });
 
+        // 5. Actualizar la Base de Datos
         const rawPayload = mpResult.alreadyCancelled ? null : mpResult;
         await repo.updateStatus(subscriptionId, "cancelled", rawPayload);
 
@@ -198,9 +212,11 @@ async function cancelSubscription(req, res, next) {
             ? "La suscripción ya estaba cancelada en MP." 
             : "Suscripción cancelada exitosamente.";
 
+        console.log(`✅ [CancelSub OUT] ${message}`);
         return res.json({ ok: true, message });
 
     } catch (error) {
+        console.error("❌ Error en cancelSubscription:", error);
         next(error);
     }
 }
