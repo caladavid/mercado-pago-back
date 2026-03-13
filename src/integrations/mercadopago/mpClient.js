@@ -1,24 +1,35 @@
 const { PreApproval, default: MercadoPagoConfig, PreApprovalPlan } = require("mercadopago");
 const config = require("../../config/env");
+const { fa } = require("zod/v4/locales");
 // src/integrations/mercadopago/mpClient.js
 const BASE_URL = "https://api.mercadopago.com";
 
 const fetchFn = global.fetch ? global.fetch.bind(global) : require("node-fetch");
 
-function getTokenOrThrow(isSubscription = false) {
+function getSmartToken(path, forceSubscriptionToken = false) {
 
-  /* const token = isSubscription 
+  if (!config.isDev) {
+    return config.mpAccessToken;
+  }
+
+  if (forceSubscriptionToken || path.includes("preapproval")) {
+    return config.mpSubscriptionAccessToken;
+  }
+
+  /* const token = forceSubscriptionToken 
         ? config.mpSubscriptionAccessToken
         : config.mpAccessToken; */
 
-  const token = config.mpSubscriptionAccessToken;
+  /* const token = config.mpSubscriptionAccessToken; */
 
-  if (!token) {
+  /* if (!token) {
     const err = new Error("MercadoPago access token missing in environment variables.");
     err.status = 500;
     throw err;
   }
-  return token;
+  return token; */
+
+  return config.mpAccessToken;
 }
 
 /* function getTokenOrThrow() {
@@ -34,8 +45,12 @@ function getTokenOrThrow(isSubscription = false) {
 // Función auxiliar para esperar (Sleep)
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function mpHeaders({ idempotencyKey, isSubscription = false } = {}) {
-  const token = getTokenOrThrow(isSubscription);
+function mpHeaders(path, opts = {}) {
+  const forceSubToken = opts.forceSubToken || false;
+  const idempotencyKey = opts.idempotencyKey;
+
+  const token = getSmartToken(path, forceSubToken);
+
 /* console.log("Using MP access token of length:", token); */
   const headers = {
     "Content-Type": "application/json",
@@ -43,21 +58,23 @@ function mpHeaders({ idempotencyKey, isSubscription = false } = {}) {
     Authorization: `Bearer ${token}`,
   };
 
-  if (idempotencyKey) headers["X-Idempotency-Key"] = idempotencyKey;
+  if (idempotencyKey) {
+    headers["X-Idempotency-Key"] = idempotencyKey;
+  }
 
   // Log seguro (sin token completo)
   const prefix = token.slice(0, 12);
   /* console.log("MP token prefix:", prefix, "len:", token.length); */
 
-  console.log(`🕵️‍♂️ [AUTH CHECK] Armando request con Token: ${token.slice(0, 15)}... | isSubscription: ${isSubscription}`)
+  console.log(`🕵️‍♂️ [AUTH CHECK] Armando request con Token: ${token.slice(0, 15)}... | isSubscription: ${forceSubToken}`)
 
   return headers;
 }
 
-async function mpRequest(method, path, body, opts = {}) {
+async function mpRequest(method, path, body = null, opts = {}) {
   const res = await fetchFn(`${BASE_URL}${path}`, {
     method,
-    headers: mpHeaders(opts),
+    headers: mpHeaders(path, opts),
     body: body ? JSON.stringify(body) : undefined,
   });
 
@@ -70,6 +87,13 @@ async function mpRequest(method, path, body, opts = {}) {
   }
 
   if (!res.ok) {
+
+    if (res.status === 404 && config.isDev && path.startsWith('/v1/payments') && !opts.forceSubToken) {
+        console.warn(`🔄 [MP-SMART-RETRY] Pago no encontrado con Token Regular. Reintentando con Token de Suscripción...`);
+        const retryOpts = { ...opts, forceSubToken: true };
+        return mpRequest(method, path, body, retryOpts); 
+    }
+
     const requestId =
       res.headers.get("x-request-id") ||
       res.headers.get("x-mp-request-id") ||
@@ -129,13 +153,11 @@ async function searchSubscriptionCustomerByEmail(email) {
   const q = encodeURIComponent(email);
   
   try {
-    // 💡 LA CLAVE: Pasamos el 4to argumento { isSubscription: true }
-    // Esto activa MP_ACCESS_TOKEN2 en getTokenOrThrow
     const response = await mpRequest(
         "GET", 
         `/v1/customers/search?email=${q}`,
         null, // Body es null en GET
-        { isSubscription: true } // Options
+        { forceSubToken: true } // Options
     );
     
     if (response && response.results && response.results.length > 0) {
@@ -157,7 +179,7 @@ async function createSubscriptionCustomer(
     "POST",
     "/v1/customers",
     { email, first_name, last_name, identification, metadata },
-    { idempotencyKey, isSubscription: false } 
+    { idempotencyKey, forceSubToken: false } 
   );
 }
 
@@ -214,8 +236,10 @@ async function createPayment(
     payer,
     currency_id,
     external_reference,
+    card_id,
+    issuer_id
   },
-  { idempotencyKey } = {}
+  opts = {}
 ) {
   if (currency_id) {
     const err = new Error("currency_id is not supported in this payment request");
@@ -224,7 +248,9 @@ async function createPayment(
   }
 
   // --- 🔍 DEBUG START ---
-  console.log("%c🚀 [MP-CLIENT] Enviando Pago a /v1/payments", "color: #009ee3; font-weight: bold;");
+  console.log("\n=============================================");
+  console.log("🚀 [MP-CLIENT] ANÁLISIS DE PAYLOAD A /v1/payments");
+  console.log("=============================================");
   
   const payload = {
     token,
@@ -234,18 +260,23 @@ async function createPayment(
     payment_method_id,
     payer,
     external_reference,
+    card_id,    issuer_id
   };
 
-  console.log("📦 Body enviado:", JSON.stringify(payload, null, 2));
-  console.log("🔑 Idempotency Key:", idempotencyKey || "No enviada");
-  // --- 🔍 DEBUG END ---
+  console.log("1️⃣ [TOKEN]:", token ? `${token.substring(0, 10)}... (Longitud: ${token.length})` : "NULO/INDEFINIDO");
+  console.log("2️⃣ [PAYMENT METHOD]:", payment_method_id || "No enviado");
+  console.log("3️⃣ [CARD ID / ISSUER]:", card_id || "N/A", "/", issuer_id || "N/A");
+  console.log("4️⃣ [PAYER OBJECT]:", JSON.stringify(payer, null, 2));
+  console.log("5️⃣ [OPCIONES (opts)]:", JSON.stringify(opts, null, 2));
+  console.log("6️⃣ [JSON COMPLETO]:", JSON.stringify(payload, null, 2));
+  console.log("=============================================\n");
 
   try {
     const result = await mpRequest(
       "POST",
       "/v1/payments",
       payload,
-      { idempotencyKey }
+      opts
     );
 
     console.log("✅ [MP-CLIENT] Respuesta Exitosa:", result.id, result.status);
@@ -253,16 +284,18 @@ async function createPayment(
 
   } catch (error) {
     // El error 500 ya se imprime en mpRequest, pero aquí capturamos el contexto
-    console.error("❌ [MP-CLIENT] Falló la creación del pago.");
+    console.error("❌ [MP-CLIENT ERROR CRÍTICO]:");
+    console.error("- HTTP Status:", error.status);
+    console.error("- Request ID:", error.requestId);
+    console.error("- RAW Message:", error.message);
     throw error;
   }
 }
 
-
 // GET /v1/payment_methods/search?bin=...
 async function searchPaymentMethodsByBin(bin) {
   const q = encodeURIComponent(bin);
-  const publicKey = process.env.MP_PUBLIC_KEY;
+  const publicKey = config.mpPublicKey;
   if (!publicKey) {
     const err = new Error("MercadoPago public key missing: set MP_PUBLIC_KEY env");
     err.status = 500;
@@ -354,8 +387,7 @@ async function createPreApproval(payload) {
   return mpRequest(
     "POST",
     "/preapproval",
-    payload,
-    { isSubscription: true }
+    payload
   );
 }
 
@@ -366,8 +398,7 @@ async function createPreApprovalPlan(planData) {
   return mpRequest(
     "POST",
     "/preapproval_plan",
-    planData,
-    { isSubscription: true }
+    planData
   );
 }
 
@@ -414,8 +445,8 @@ async function deleteCustomerCards(customerId, cardId) {
   return mpRequest("DELETE", `/v1/customers/${customerId}/cards/${cardId}`);
 }
 
-// DELETE v1/customers/{customer_id}/cards/{id}
-async function createTokenFromCardId(cardId, securityCode = null) {
+
+async function createTokenFromCardId(cardId, securityCode = null, opts = {}) {
   
   const body = { 
     card_id: cardId 
@@ -427,7 +458,7 @@ async function createTokenFromCardId(cardId, securityCode = null) {
   }
 
   console.log(`🔑 [createTokenFromCardId] URL: /v1/card_tokens, body: { card_id, security_code }`);
-  return mpRequest("POST", "/v1/card_tokens", body);
+  return mpRequest("POST", "/v1/card_tokens", body, opts);
 }
 
 // PUT /preapproval/{id} -> Para cancelar suscripciones
@@ -437,8 +468,17 @@ async function cancelPreApproval(preapprovalId) {
   return mpRequest(
     "PUT", 
     `/preapproval/${preapprovalId}`, 
-    { status: "cancelled" }, 
-    { isSubscription: true } 
+    { status: "cancelled" }
+  );
+}
+
+async function updatePreApprovalPlan(planId, payload) {
+  console.log(`🚫 [MP Client] Actualizando/Cancelando Plan Base: ${planId}`);
+  
+  return mpRequest(
+    "PUT", 
+    `/preapproval_plan/${planId}`, 
+    payload
   );
 }
 
@@ -464,4 +504,5 @@ module.exports = {
   searchSubscriptionCustomerByEmail,
   createSubscriptionCustomer,
   cancelPreApproval,
+  updatePreApprovalPlan
 };
