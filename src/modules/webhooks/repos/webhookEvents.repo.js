@@ -54,26 +54,11 @@ async function updateOrderStatusByPaymentId(externalReference, mpStatus, payment
       updated_at = NOW()  
     WHERE (
       external_reference = $2 
-      OR external_reference = REPLACE($2, 'comerciante-contenido:', '')
+      OR external_reference LIKE '%' || $2
     ) 
     AND status != $1
     RETURNING id, external_reference, user_id, total_amount, currency, status  
   `;
-
-/* 
-  const q = `  
-    UPDATE orders   
-    SET 
-      status = $1, 
-      mp_payment_id = COALESCE(mp_payment_id, $3),
-      updated_at = NOW()  
-    WHERE external_reference = $2  
-    AND (
-      status != 'paid'
-      OR ($1 IN ('refunded', 'disputed'))
-    )
-    RETURNING id, external_reference, user_id, total_amount, currency  
-  `; */
 
   try {
     const { rows } = await pool.query(q, [
