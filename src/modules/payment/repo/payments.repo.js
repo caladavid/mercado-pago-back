@@ -29,8 +29,11 @@ async function upsertPaymentRecord(paymentData) {
         DO UPDATE SET 
             status = EXCLUDED.status, 
             status_detail = EXCLUDED.status_detail,
+            order_id = EXCLUDED.order_id, 
+            subscription_id = EXCLUDED.subscription_id,
+            merchant_id = EXCLUDED.merchant_id,
             updated_at = NOW()
-        RETURNING id;
+        RETURNING id, subscription_id, merchant_id;
     `;
 
     const values = [
