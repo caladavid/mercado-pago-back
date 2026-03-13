@@ -5,8 +5,6 @@ const morgan = require("morgan");
 
 const adminRoutes = require("./routes/admin");
 const merchantRoutes = require("./routes/merchant");
-const subscriptionRoutes = require("./modules/subscriptions/routes");
-const planRoutes = require("./modules/plans/routes");
 const webhookRoutes = require("./modules/webhooks/routes");
 const { checkMPStatus } = require("./modules/Health/controller/health.controller");
 
