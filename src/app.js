@@ -8,15 +8,28 @@ const merchantRoutes = require("./routes/merchant");
 const subscriptionRoutes = require("./modules/subscriptions/routes");
 const planRoutes = require("./modules/plans/routes");
 const webhookRoutes = require("./modules/webhooks/routes");
+const { checkMPStatus } = require("./modules/Health/controller/health.controller");
 
 const app = express();
 
 app.use(helmet());
-app.use(cors());
+
+const corsOptions = {
+  origin: "*", // Permite que cualquier URL (tus túneles) se conecte
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type", 
+    "Authorization", 
+    "bypass-tunnel-reminder", // <- Clave para engañar a la pantalla de Microsoft
+    "x-localtunnel-skip-warning"
+  ]
+};
+
+app.use(cors(corsOptions));
 app.use(express.json({ limit: "1mb" }));
 app.use(morgan("dev"));
 
-app.get("/health", (req, res) => res.json({ ok: true }));
+app.get("/health", checkMPStatus);
 
 app.use("/admin", adminRoutes);
 app.use("/api", merchantRoutes);

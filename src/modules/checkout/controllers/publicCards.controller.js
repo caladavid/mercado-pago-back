@@ -110,8 +110,8 @@ async function listCards(req, res, next) {
       });
       
     } catch (error) {
-      if (error.status === 404) {
-        console.error(`❌ [ListCards] El ID ${mpCustomer.mp_customer_id} no existe en MP. Limpiando respuesta.`);
+      if (error.status === 404 || error.status === 401) {
+        console.warn(`⚠️ [ListCards] El ID ${mpCustomer.mp_customer_id} es inválido o de otro entorno (Status: ${error.status}). Devolviendo lista vacía.`);
         return res.json({ cards: [] }); 
       }
       // Si es otro tipo de error (500, etc), que lo maneje el catch de afuera

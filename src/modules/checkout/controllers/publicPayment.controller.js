@@ -15,6 +15,7 @@ const mpCustomersRepo = require("../repos/mpCustomers.repo");
 const { createSubscriptionFromPlan, processSubscriptionLogic } = require("../../subscriptions/controllers/subscriptions.controller");
 const { upsertUser } = require("../repos/checkout.repo");
 const { insertCardInstrument } = require("../repos/paymentInstruments.repo");
+const config = require("../../../config/env");
 
 const PayBodySchema = z.object({
   mp_card_token: z.string().min(10).optional(),
@@ -204,11 +205,11 @@ if (!customerId) {
 /**
  * Obtiene un token fresco (re-tokenización) si hay CVV.
  */
-async function getFreshToken(cardToken, cvv) {
+async function getFreshToken(cardToken, cvv, opts = {}) {
   if (!cardToken || !cvv) return cardToken;
 
   try {
-    const tokenResponse = await createTokenFromCardId(cardToken, cvv);
+    const tokenResponse = await createTokenFromCardId(cardToken, cvv, opts);
     if (tokenResponse && tokenResponse.id){
       console.log(`[Checkout] ✅ Nuevo Token Generado: ${tokenResponse.id}`);
       return tokenResponse.id;
@@ -254,9 +255,9 @@ async function executeMpTransaction(strategy, data) {
       status: sub.status, // authorized, pending...
       status_detail: "subscription_created",
       transaction_amount: sub.auto_recurring?.transaction_amount || amount,
-      currency_id: sub.auto_recurring?.currency_id || "UYU",
+      currency_id: sub.auto_recurring?.currency_id || (config.isDev ? "UYU" : "CLP"),
       payment_type_id: "subscription",
-      payment_method_id: methodId, // Usamos el que resolvimos antes (visa/master)
+      payment_method_id: methodId,
       raw: sub
     };
   }
@@ -289,7 +290,10 @@ async function executeMpTransaction(strategy, data) {
 
   console.log("📦 PAYLOAD PAGO:", JSON.stringify(payPayload, null, 2));
   
-  const payment = await createPayment(payPayload, { idempotencyKey });
+  const payment = await createPayment(payPayload, { 
+      idempotencyKey, 
+      forceSubToken: data.forceSubToken || false 
+  });
   
   return {
     id: payment.id,
@@ -298,7 +302,7 @@ async function executeMpTransaction(strategy, data) {
     payment_type_id: payment.payment_type_id,
     payment_method_id: payment.payment_method_id,
     transaction_amount: payment.transaction_amount || Number(amount),
-    currency_id: payment.currency_id || "UYU",
+    currency_id: payment.currency_id || (config.isDev ? "UYU" : "CLP"),
     raw: payment
   };
 }
@@ -371,17 +375,6 @@ async function resolvePaymentMethod(methodId, bin) {
 
   const pm = await searchPaymentMethodsByBin(bin);
   const results = pm?.results || [];
-
-/* 
-  const preferredOrder = new Set(["visa", "master", "amex", "diners", "oca", "lider"]);
-  const candidates = results.filter(
-    (r) => r.payment_type_id === "credit_card" && r.status === "active"
-  );
-  candidates.sort((a, b) => {
-    const aScore = preferredOrder.has(a.id) ? 0 : 1;
-    const bScore = preferredOrder.has(b.id) ? 0 : 1;
-    return aScore - bScore;
-  }); */
 
   const candidates = results.filter(r => r.status === "active");
 
@@ -481,7 +474,7 @@ async function payCheckout(req, res, next) {
 
       const isSavedCard = !!card_id;
       let tokenForPayment = null;
-
+      
       if (isSavedCard) {
           // Pagando con Tarjeta Guardada: Necesitamos CVV fresco
           console.log("💳 [TOKEN] Generando token fresco desde Card ID...");
@@ -596,9 +589,6 @@ async function payCheckout(req, res, next) {
       ? 'subscription' 
       : 'one_time'; */
       
-      
-      
-
         // PASO G: Guardar en Base de Datos
         const payloadLog = preapproval_plan_id 
             ? { plan_id: preapproval_plan_id, card: tokenForPayment } 
@@ -652,7 +642,13 @@ async function payCheckout(req, res, next) {
       back_url: result.backUrl
     });
   } catch (e) {
+    console.error("=========================================");
+    console.error("🔥 ERROR FATAL EN PRODUCCIÓN DETECTADO:");
     console.error("❌ [PAY_CHECKOUT_ERROR]:", e.response?.data || e.message);
+    console.error(e); // Imprime el objeto de error completo
+    console.error("Mensaje:", e.message);
+    console.error("Stack:", e.stack);
+    console.error("=========================================");
 
     let statusCode = 500;
     let errorCode = "server_error";

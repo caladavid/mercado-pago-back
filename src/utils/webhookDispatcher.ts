@@ -29,7 +29,7 @@ export async function notifyMerchants(tenantUrl: string, payload: EnrollmentPayl
 
         const response = await axios.post(tenantUrl, payload, {
             headers: {
-                'X-Gateway-Signature': signature,
+                'X-Signature': signature,
                 'Content-Type': 'application/json',
                 'User-Agent': 'MP-Payment/1.0'
             },

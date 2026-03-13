@@ -11,7 +11,8 @@ exports.createCheckout = async (req, res, next) => {
     const merchantSlug = req.merchant?.slug;
     const merchantId = req.merchant?.id;
     if (!merchantSlug || !merchantId) return res.status(401).json({ error: "merchant not authenticated" });
-
+    console.log("merchantSlug", merchantSlug);
+    console.log("merchantId", merchantId);
 
     const { buyer, item, type, preapproval_plan_id, back_url } = req.body || {};
 
