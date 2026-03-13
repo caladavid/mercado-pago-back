@@ -1,9 +1,17 @@
 const { Router } = require('express');
-const { createPlan } = require('./controllers/createPlanController');
+const { createPlan, listPlans, cancelPlan, getPlan } = require('./controllers/createPlanController');
+const { merchantAuth } = require("../../middlewares/merchantAuth");
 
 const router = Router();
 
-// POST http://localhost:3000/api/plans
+router.use(merchantAuth);
+
+router.get('/', listPlans);
+
 router.post('/', createPlan);
+
+router.get('/:id', getPlan);
+
+router.put('/:id/cancel', cancelPlan);
 
 module.exports = router;
