@@ -1,8 +1,6 @@
 const { Router } = require('express');
 const { transactionController } = require('./controllers/transactions.controller');
 const { customerController } = require('./controllers/customer.controller');
-/* const mw = require("../../middlewares/merchantAuth");
-const tenantAuth = mw.tenantAuth; */
 const { merchantAuth } = require("../../middlewares/merchantAuth");
 
 const router = Router();

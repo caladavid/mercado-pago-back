@@ -2,8 +2,6 @@ import { Response } from 'express';
 import { TenantRequest } from './transactions.controller'; // O de donde venga tu interfaz
 import { customerRepo } from '../repos/customer.repo';
 
-
-
 export const customerController = {
   
   // 👥 1. Obtener listado de clientes

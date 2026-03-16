@@ -1,5 +1,6 @@
 const readRepo = require("../repos/checkoutRead.repo");
 const mpRepo = require("../repos/mpCustomers.repo");
+const config = require("../../../config/env");
 const { ensureMpCustomer } = require("./publicPayment.controller");
 
 exports.getCheckout = async (req, res, next) => {
@@ -26,8 +27,12 @@ exports.getCheckout = async (req, res, next) => {
     const isSubscription = order.type === 'subscription' || !!order.preapproval_plan_id;
 
     const publicKeyToUse = isSubscription 
+        ? config.mpSubscriptionPublicKey
+        : config.mpPublicKey;
+
+    /* const publicKeyToUse = isSubscription 
         ? process.env.MP_PUBLIC_KEY_SUBSCRIPTIONS 
-        : process.env.MP_PUBLIC_KEY;
+        : process.env.MP_PUBLIC_KEY; */
 
         console.log(`[isSubscription] Tipo: ${isSubscription ? 'Suscripción' : 'Pago Único'}. Key usada: ${publicKeyToUse}`);
 
