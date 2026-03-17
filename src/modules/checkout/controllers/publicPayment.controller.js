@@ -324,7 +324,10 @@ async function persistTransactionResult(tx, row, payment, payloadSent, idempoten
   await tx.query(
     `UPDATE orders
     SET 
-      status = $1, 
+      status = CASE 
+      WHEN status IN ('paid', 'failed') THEN status 
+      ELSE $1 
+    END,
       mp_merchant_order_id = COALESCE($2, mp_merchant_order_id),
       mp_payment_id = $3
     WHERE id = $4`,
