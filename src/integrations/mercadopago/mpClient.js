@@ -1,7 +1,6 @@
-const { PreApproval, default: MercadoPagoConfig, PreApprovalPlan } = require("mercadopago");
+// src/integrations/mercadopago/mpClient.js
 const config = require("../../config/env");
 const { fa } = require("zod/v4/locales");
-// src/integrations/mercadopago/mpClient.js
 const BASE_URL = "https://api.mercadopago.com";
 
 const fetchFn = global.fetch ? global.fetch.bind(global) : require("node-fetch");

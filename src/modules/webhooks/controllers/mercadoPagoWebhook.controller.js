@@ -10,6 +10,8 @@ const { pool } = require("../../../db/pool");
 const { stat } = require("fs");
 const { notifyMerchants } = require("../../../utils/webhookDispatcher");
 /* const { notifyMerchants } = require("../../../utils/webhookDispatcher"); */
+const config = require("../../../config/env");
+
 
 function coalesceDataId(payload) {
   return (
@@ -30,6 +32,9 @@ function normalizeReceivedAt(payload) {
  */
 function verifySignature(signature, requestId, payload) {
   if (!signature || !requestId) return false;
+  console.log("👉 Request-ID:", requestId);
+  console.log("👉 Signature Header:", signature);
+  console.log("👉 Payload Data ID:", payload?.data?.id);
 
   const tsMatch = signature.match(/ts=([^,]+)/);
   const v1Match = signature.match(/v1=([^,]+)/);
@@ -41,11 +46,13 @@ function verifySignature(signature, requestId, payload) {
   const dataId = payload?.data?.id;
   const manifest = `id:${dataId};request-id:${requestId};ts:${ts};`;
 
-  const availableSecrets = [
+  /* const availableSecrets = [
     process.env.MP_WEBHOOK_SECRET,
     process.env.MP_WEBHOOK_SECRET2
-  ].filter(Boolean);
+  ].filter(Boolean); */
 
+  const availableSecrets = config.webhookSecrets;
+  
   for (const secret of availableSecrets) {
     const cyphedSignature = crypto
       .createHmac('sha256', secret)
@@ -68,7 +75,7 @@ async function receiveMercadoPagoWebhook(req, res, next) {
 
   try {
 
-    /* const signature = req.headers["x-signature"];
+    const signature = req.headers["x-signature"];
     if (!signature){
       return res.status(400).json({ error: "Missing signature" });  
     }
@@ -76,7 +83,7 @@ async function receiveMercadoPagoWebhook(req, res, next) {
     const requestId = req.headers["x-request-id"];
     if (!requestId){
       return res.status(400).json({ error: "Missing request id" });  
-    } */
+    }
 
     const payload = req.body;
     if (!payload || typeof payload !== "object") {
@@ -126,10 +133,10 @@ async function receiveMercadoPagoWebhook(req, res, next) {
       return res.status(401).json({ error: "Invalid signature" }); 
     } */
 
-    /* if (!verifySignature(signature, requestId, payload)) {
+    if (!verifySignature(signature, requestId, payload)) {
       console.error("❌ [verifySignature] Firma inválida rechazada.");
       return res.status(401).json({ error: "Firma inválida" });
-    } */
+    }
 
     console.log(`[verifySignature] Firma verificada correctamente.`);
 
@@ -150,7 +157,7 @@ async function receiveMercadoPagoWebhook(req, res, next) {
     if (!row?.id) {
       console.log(`[row] Ignorado: El evento (Data ID: ${dataId}) ya fue procesado anteriormente.`);
       console.log("[row] Payload detectado como duplicado:", JSON.stringify(payload, null, 2));
-      /* return res.status(200).json({ ok: true, duplicate: true }); */
+      return res.status(200).json({ ok: true, duplicate: true });
     }
 
     console.log(`[Webhook] Guardado en DB (ID interno: ${dbId}). Respondiendo 200 OK a MP.`);
@@ -198,11 +205,10 @@ async function processApprovedPayment(payload) {
 
     if (external_reference === "Recurring payment validation") {
         console.log(`[processApprovedPayment] 🛡️ Ignorando pago de validación de tarjeta (ID: ${paymentId}). No requiere acción.`);
-        return; // Detenemos la ejecución aquí
+        return; 
     }
 
     console.log(`[mpPayment] Consultando MP para conocer estado real del pago ID: ${mpPayment}...`);
-    /* console.log("🔍 [Debug] Estructura de mpPayment:", JSON.stringify(mpPayment, null, 2)); */
 
     console.log("operation_type", operation_type);
     if (operation_type === "recurring_payment") {
@@ -404,7 +410,7 @@ async function handleRecurringPayment(mpPayment, paymentId) {
         if (mpPreapprovalId) {
             const subRecord = await subsRepo.getSubscriptionByMPId(mpPreapprovalId);
             if (subRecord) {
-                localSubscriptionId = subRecord.id; // ¡Este es el UUID que Postgres quiere!
+                localSubscriptionId = subRecord.id;
             }
         }
 
@@ -414,7 +420,6 @@ async function handleRecurringPayment(mpPayment, paymentId) {
 
 
         const merchant = await merchantRepo.getMerchantById(orderRow.merchant_id);
-        /* const merchant = await merchantRepo.getMerchantById("bbc419db-cbdb-4cac-a794-dbdb1c548484"); */
 
         if (!merchant) {
             console.warn(`⚠️ [Recobro] No se encontró el merchant (${orderRow.merchant_id}) para notificar el rechazo.`);
@@ -458,17 +463,6 @@ async function handleRecurringPayment(mpPayment, paymentId) {
                 local_go_id: external_reference
             };
 
-            const tenantUrl = "https://webhook.site/9bf45c8d-bba3-468c-8a3f-c3ee33310959"; 
-            const secretToken = "mi_secreto_super_seguro_123";
-
-            //a quien
-            
-            // Para test
-            /* notifyMerchants(tenantUrl, payloadNotificacion, secretToken)
-                .then(res => console.log(`📡 [Dispatcher] Merchant notificado del RECOBRO (Status: ${res.status})`))
-                .catch(err => console.error(`❌ [Dispatcher] Error notificando al Merchant:`, err)); */
-
-                // Para prod
             notifyMerchants(merchant.webhook_url, payloadNotificacion, merchant.webhook_secret)
                     .then(res => console.log(`📡 [Dispatcher] Merchant: ${merchant.name} - notificado (Status: ${res.status})`))
                     .catch(err => console.error(`❌ [Dispatcher] Error notificando a ${merchant.name}:`, err));

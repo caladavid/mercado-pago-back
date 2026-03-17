@@ -8,6 +8,9 @@ const envSchema = z.object({
     NODE_ENV: z.enum(['development', 'production']).default('production'),
     PORT: z.string().optional(),
     MP_ACCESS_TOKEN_PROD: z.string().min(1, "Falta el token de producción"),
+    MP_WEBHOOK_SECRET_PROD: z.string().min(1, "Falta el key del Webhook de producción"),
+    MP_WEBHOOK_SECRET: z.string().optional(),
+    MP_WEBHOOK_SECRET2: z.string().optional(),
 });
 
 console.log("-----------------------------------------");
@@ -42,6 +45,10 @@ module.exports = {
     mpPublicKey: isDev 
         ? process.env.MP_PUBLIC_KEY 
         : process.env.MP_PUBLIC_KEY_PROD,
+
+    webhookSecrets: isDev
+        ? [process.env.MP_WEBHOOK_SECRET, process.env.MP_WEBHOOK_SECRET2].filter(Boolean)
+        : [process.env.MP_WEBHOOK_SECRET_PROD].filter(Boolean),
 
     port: process.env.PORT || 3001,
 }
