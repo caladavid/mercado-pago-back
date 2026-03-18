@@ -278,11 +278,6 @@ async function executeMpTransaction(strategy, data) {
       payPayload.payer.id = customerId;
       payPayload.payer.type = "customer"; 
   }
-  
-  // Agregamos methodId solo si es específico (no tarjeta estándar)
-  /* if (methodId && !['visa', 'master', 'amex', 'debvisa', 'debmaster', 'oca', 'lider', 'diners'].includes(methodId)) {
-      payPayload.payment_method_id = methodId;
-  } */
 
     if (methodId) {
       payPayload.payment_method_id = methodId;
@@ -573,24 +568,6 @@ async function payCheckout(req, res, next) {
               /* if (isSubscription) throw e; */ 
           }
       }
-
-          /* const freshToken = await getFreshToken(initialCardToken, security_code); */
-
-  /*     console.log("🛑 [TEST] Deteniendo ejecución antes del pago.");
-      return {
-          transactionResult: {
-              id: "test_vault_" + Date.now(),
-              status: "approved",
-              status_detail: "card_linked_only",
-              payment_type_id: "test_mode"
-          },
-          backUrl: orderRow.back_url
-      }; */
-      
-      
-      /* const strategy = (orderRow.type === 'subscription' || !!planIdToUse) 
-      ? 'subscription' 
-      : 'one_time'; */
       
         // PASO G: Guardar en Base de Datos
         const payloadLog = preapproval_plan_id 
@@ -599,8 +576,6 @@ async function payCheckout(req, res, next) {
 
         await persistTransactionResult(tx, orderRow, transactionResult, payloadLog, idempotencyKey);
         console.log(`[persistTransactionResult] Orden guardada en PENDING esperando Webhook asíncrono.`);
-
-        /* console.log("🛑 [TEST WEBHOOK] Hemos cobrado, pero NO guardaremos el resultado en la DB. Esperando al Webhook..."); */
 
 
         const finalBackUrl = back_url || orderRow.back_url;

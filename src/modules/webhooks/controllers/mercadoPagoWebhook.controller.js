@@ -175,6 +175,11 @@ async function receiveMercadoPagoWebhook(req, res, next) {
   }
 }
 
+/**
+ * Enrutador principal de eventos en segundo plano de Mercado Pago.
+ * Recibe el tipo de evento y el payload, y delega la ejecución al
+ * manejador específico correspondiente (pagos, suscripciones, etc.).
+ */
 async function processEventBackground(eventType, payload) {
   console.log(`[processEventBackground] Seleccionando el tipo de evento: ${eventType}`);
   switch (eventType) {
@@ -193,6 +198,12 @@ async function processEventBackground(eventType, payload) {
   }
 }
 
+/**
+ * Procesa los webhooks de tipo "payment".
+ * Consulta la API de Mercado Pago para obtener el estado real del dinero 
+ * y enruta el flujo dependiendo de si es un cobro automático (recurrente) 
+ * o una compra tradicional (regular).
+ */
 async function processApprovedPayment(payload) {
   console.log(`📡 [processApprovedPayment] Evento para pago`);
   console.log(`                                            `);
@@ -230,6 +241,11 @@ async function processApprovedPayment(payload) {
 
 }
 
+/**
+ * Maneja la creación de nuevos contratos de suscripción (Preapproval).
+ * Sincroniza las fechas en la base de datos y envía el Webhook de ALTA
+ * al Merchant (is_renewal: false) para que desbloquee el servicio al cliente.
+ */
 async function processApprovedSubscription(payload) {
     console.log(`📡 [processApprovedSubscription] Evento para suscripcion`);
     console.log(`                                            `);
@@ -252,23 +268,55 @@ async function processApprovedSubscription(payload) {
     
     if (status === "authorized") {
       console.log(`✅ Suscripción ${id} ACTIVA y cobrando.`);
+      let orderRow = null;
+
       if (external_reference) {
         try {
           await repo.updateOrderStatusByPaymentId(external_reference, "authorized", id);
           console.log(`🎉 [updateOrderStatus] Orden ${external_reference} vinculada al contrato.`);
+          orderRow = await ordersRepo.getOrderById(external_reference);
         } catch (updateError) {
            console.error(`💥 Error actualizando tabla orders:`, updateError.message);
         }
       }
 
       if (next_payment_date) {
-              try {
-                  await subsRepo.updateNextBillingDate(id, next_payment_date);
-                  console.log(`📅 [DB] Fecha de próximo cobro actualizada a: ${next_payment_date}`);
-              } catch (dateError) {
-                  console.error(`💥 Error actualizando la fecha del próximo mes:`, dateError.message);
-              }
+          try {
+              await subsRepo.updateNextBillingDate(id, next_payment_date);
+              console.log(`📅 [DB] Fecha de próximo cobro actualizada a: ${next_payment_date}`);
+          } catch (dateError) {
+              console.error(`💥 Error actualizando la fecha del próximo mes:`, dateError.message);
           }
+      }
+
+      if (orderRow) {
+          const merchant = await merchantRepo.getMerchantById(orderRow.merchant_id);
+          
+          if (merchant && merchant.webhook_url) {
+              // Obtenemos el monto del objeto auto_recurring de Mercado Pago
+              const amount = mpSubscription.auto_recurring?.transaction_amount;
+
+              const payloadNotificacion = {
+                  type: 'subscription',
+                  is_renewal: false, 
+                  id_subscription: id, 
+                  name: orderRow.full_name || orderRow.user_name,
+                  email: orderRow.email || orderRow.user_email,
+                  status: status, 
+                  amount: amount,
+                  fecha: new Date().toISOString(),
+                  local_go_id: external_reference
+              };
+
+              notifyMerchants(merchant.webhook_url, payloadNotificacion, merchant.webhook_secret)
+                  .then(res => console.log(`📡 [Dispatcher] Merchant notificado del ALTA de Suscripción (Status: ${res.status})`))
+                  .catch(err => console.error(`❌ [Dispatcher] Error notificando alta de suscripción al Merchant:`, err));
+          } else {
+              console.warn(`⚠️ No se notificó al merchant porque no se encontró o no tiene webhook_url (Merchant ID: ${orderRow.merchant_id})`);
+          }
+      } else {
+          console.warn(`⚠️ No se pudo notificar al merchant porque no se encontró la orden original para la ref: ${external_reference}`);
+      }
     }
 
   } catch (error) {
@@ -277,101 +325,11 @@ async function processApprovedSubscription(payload) {
 
 }
 
-async function processRecurringPayment(payload) {
-    console.log(`📡 [processRecurringPayment] Evento para recobro`);
-    console.log(`                                            `);
-    console.log("📦 [processRecurringPayment - Payload Completo Recibido]:", JSON.stringify(payload, null, 2));
-    console.log(`                                            `);
-
-  try {
-    const paymentId = payload.data.id;
-    console.log(`\n🔄 =======================================================`);
-    console.log(`🔄 [Recobro] Iniciando flujo de renovación (Pago ID: ${paymentId})`);
-    /* console.log("data id:", payload.data.id); */
-    const mpPayment = await getPaymentFromMP(paymentId);
-    const { status, status_detail, external_reference, transaction_amount } = mpPayment;
-
-    if (!external_reference) {
-        console.warn(`[external_reference] El pago recurrente ${paymentId} no tiene external_reference. Imposible enlazar.`);
-        return;
-    }
-    
-    console.log(`🔍 [MP API] Recobro ${external_reference} está en estado: '${status}' (${status_detail}) por $${transaction_amount}`);
-
-    // Buscamos la orden original para sacar el user_id y order_id
-    let orderRow = await ordersRepo.getOrderById(external_reference);
-
-    if (!orderRow) {
-        console.error(`❌ [Recobro] No se encontró la orden original ${external_reference} en la BD.`);
-        /* return; */
-        orderRow = {
-          id: '5a34f8a1-91d5-48d7-ac9b-96dc54b44fe9',
-          user_id: '4dc58f16-5dc6-4888-be4f-b78632c218e6',
-          user_name: 'Test test',
-          user_email: 'test_user_3973871619842264462@testuser.com',
-          mp_payment_id: '149002318152' 
-      };
-    }
-
-    await paymentsRepo.upsertPaymentRecord({
-      userId: orderRow.user_id,
-      orderId: orderRow.id,
-      mpPaymentId: paymentId,
-      status: status,
-      statusDetail: status_detail,
-      amount: transaction_amount,
-      currency: mpPayment.currency_id,
-      paymentTypeId: 'subscription_recurring',
-      externalReference: external_reference,
-      rawPayload: mpPayment
-    });
-
-    console.log(`[paymentsRepo.upsertPaymentRecord] Movimiento de pago recurrente ${paymentId} guardado/actualizado.`);
-    console.log("orderRow tEST", orderRow);
-    if (status === "approved") {
-      console.log(`[Recobro-Status] ¡Cobro exitoso! El usuario pagó su nuevo mes.`);
-      if (orderRow.mp_payment_id) {
-        const mpSubscription = await getSubscriptionFromMP(orderRow.mp_payment_id).catch(() => null);
-        console.log("mpSubscription TEST", mpSubscription);
-        if (mpSubscription && mpSubscription.next_payment_date) {
-            await subsRepo.updateNextBillingDate(mpSubscription.id, mpSubscription.next_payment_date);
-             console.log(`📅 [DB] Fecha de próxima facturación actualizada a: ${mpSubscription.next_payment_date}`);
-
-             const payloadNotificacion = {
-                type: 'subscription',
-                id_subscription: mpSubscription.id, 
-                name: orderRow.user_name || "Usuario Suscrito", // Asumiendo que tienes el nombre
-                email: orderRow.user_email || "email@desconocido.com", // Asumiendo que tienes el email
-                status: status, // "approved"
-                amount: transaction_amount,
-                fecha: new Date().toISOString(),
-                local_go_id: external_reference
-            };
-
-            const tenantUrl = "https://webhook.site/6cee62e4-bff1-4f5a-ab51-6525275b9761"; 
-            const secretToken = "mi_secreto_super_seguro_123";
-            
-            notifyMerchants(tenantUrl, payloadNotificacion, secretToken)
-                .then(res => console.log(`📡 [Dispatcher] Merchant notificado (Status: ${res.status})`))
-                .catch(err => console.error(`❌ [Dispatcher] Error notificando al Merchant:`, err));
-        }
-      }
-    } else if (status === "rejected" || status === "cancelled") {
-      console.warn(`[Recobro-Status] Rechazado o cancelado. Motivo: ${status_detail}`);
-    } else {
-      console.log(`[Recobro-Status] Estado no reconocido por el sistema: ${status}`);
-      /* notifyMerchants(tenantUrl, payloadNotificacion, secretToken)
-                .then(res => console.log(`📡 [Dispatcher] Merchant notificado (Status: ${res.status})`))
-                .catch(err => console.error(`❌ [Dispatcher] Error notificando al Merchant:`, err));
-        } */
-    }
-
-  } catch (error) {
-    console.error("Error in processRecurringPayment:", error);
-  }
-
-}
-
+/**
+ * Maneja los cobros automáticos posteriores al primer mes (Renovaciones).
+ * Guarda el historial del pago en la BD y notifica al Merchant para 
+ * mantener activo el servicio (is_renewal: true) o suspenderlo si falla.
+ */
 async function handleRecurringPayment(mpPayment, paymentId) {
     const { status, status_detail, external_reference, transaction_amount, currency_id } = mpPayment;
 
@@ -454,9 +412,10 @@ async function handleRecurringPayment(mpPayment, paymentId) {
 
             const payloadNotificacion = {
                 type: 'subscription',
-                id_subscription: orderRow.mp_payment_id || "ID_Suscripcion_No_Encontrado", 
-                name: orderRow.full_name || "Usuario Suscrito", 
-                email: orderRow.email || "email@desconocido.com", 
+                is_renewal: true,
+                id_subscription: orderRow.mp_payment_id, 
+                name: orderRow.full_name, 
+                email: orderRow.email, 
                 status: status, 
                 amount: transaction_amount,
                 fecha: new Date().toISOString(),
@@ -472,6 +431,7 @@ async function handleRecurringPayment(mpPayment, paymentId) {
 
             const payloadRechazo = {
                 type: 'subscription',
+                is_renewal: true,
                 id_subscription: orderRow.mp_payment_id, 
                 name: orderRow.full_name,
                 email: orderRow.email,
@@ -494,8 +454,12 @@ async function handleRecurringPayment(mpPayment, paymentId) {
     }
 }
 
+/**
+ * Maneja los pagos regulares (compras únicas).
+ * Actualiza el estado de la orden y notifica al Merchant.
+ */
 async function handleRegularPayment(mpPayment, paymentId) {
-    const { status, status_detail, external_reference } = mpPayment;
+    const { status, status_detail, transaction_amount, external_reference } = mpPayment;
 
     console.log(`🛒 ES UN PAGO REGULAR (Orden: ${external_reference}). Actualizando tabla orders...`);
     
@@ -507,24 +471,35 @@ async function handleRegularPayment(mpPayment, paymentId) {
             return;
         }
 
-        switch (status) {
-            case "approved":
-                console.log(`✅ ¡ÉXITO! Orden ${external_reference} pagada (Pago ID: ${paymentId}).`);
-                break;
-            case "in_process":
-            case "pending":
-                console.log(`⏳ Orden ${external_reference} en espera. Motivo: ${status_detail}`);
-                break;
-            case "rejected":
-            case "cancelled":
-                console.warn(`❌ Orden ${external_reference} fallida/rechazada. Motivo: ${status_detail}`);
-                break;
-            case "refunded":
-                console.log(`💰 Pago ${paymentId} devuelto al cliente (Orden: ${external_reference}).`);
-                break;
-            default:
-                console.log(`❓ Estado no reconocido por el sistema: ${status}`);
+        const orderRow = await ordersRepo.getOrderById(external_reference);
+        if (!orderRow) return;
+
+        const isFirstPaymentOfSubscription = orderRow.type === 'subscription';  
+
+        if (isFirstPaymentOfSubscription) {
+            console.log(`[Webhook] Primer cobro de la suscripción ${external_reference} guardado. Omitiendo notificación duplicada.`);
+            return; 
         }
+
+        const merchant = await merchantRepo.getMerchantById(orderRow.merchant_id);
+        if (!merchant) return;
+
+        const payloadNotificacion = {
+            type: 'payment', // Especificamos que es un pago único
+            id_payment: paymentId,
+            status: status,
+            status_detail: status_detail,
+            amount: transaction_amount,
+            fecha: new Date().toISOString(),
+            local_go_id: external_reference,
+            email: orderRow.email,
+            name: orderRow.full_name
+        };
+
+        notifyMerchants(merchant.webhook_url, payloadNotificacion, merchant.webhook_secret)
+            .then(res => console.log(`📡 [Dispatcher] Merchant Pago Único notificado (Status: ${res.status})`))
+            .catch(err => console.error(`❌ Error notificando pago único:`, err));
+
     } catch (error) {
         console.error("💥 Error en handleRegularPayment:", error);
     }
