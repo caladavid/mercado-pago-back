@@ -75,7 +75,7 @@ async function receiveMercadoPagoWebhook(req, res, next) {
 
   try {
 
-    /* const signature = req.headers["x-signature"];
+    const signature = req.headers["x-signature"];
     if (!signature){
       return res.status(400).json({ error: "Missing signature" });  
     }
@@ -83,60 +83,17 @@ async function receiveMercadoPagoWebhook(req, res, next) {
     const requestId = req.headers["x-request-id"];
     if (!requestId){
       return res.status(400).json({ error: "Missing request id" });  
-    } */
+    }
 
     const payload = req.body;
     if (!payload || typeof payload !== "object") {
       return res.status(400).json({ error: "Invalid webhook payload" });
     }
 
-    /* const ts = signature.split(',')[0].split('=')[1];
-    const v1 = signature.split(',')[1].split('=')[1];
-
-    if (!ts || !v1) {  
-      return res.status(401).json({ error: "Invalid signature format" });  
-    }
-
-    const manifest = `id:${payload.data.id};request-id:${requestId};ts:${ts};`;
-    
-    const availableSecrets = [
-        process.env.MP_WEBHOOK_SECRET, 
-        process.env.MP_WEBHOOK_SECRET2
-    ].filter(Boolean);
-
-    let isValidSignature = false;
-
-    for (const secret of availableSecrets) {
-        const cyphedSignature = crypto
-            .createHmac('sha256', secret)
-            .update(manifest)
-            .digest('hex');
-
-        if (cyphedSignature === v1) {
-            isValidSignature = true;
-            break; 
-        }
-    } */
-
-    /* const cyphedSignature = crypto
-        .createHmac('sha256', process.env.MP_WEBHOOK_SECRET) 
-        .update(manifest)
-        .digest('hex'); */
-
-    /* if (!isValidSignature) {
-      // Esto te ayudará a debuggear si en Prod se te olvidó poner la variable
-      console.error(`❌ Firma inválida. Se probaron ${availableSecrets.length} secretos disponibles.`);
-      return res.status(401).json({ error: "Invalid signature" });
-    } */
-
-    /* if(cyphedSignature !== v1){
-      return res.status(401).json({ error: "Invalid signature" }); 
-    } */
-
-    /* if (!verifySignature(signature, requestId, payload)) {
+    if (!verifySignature(signature, requestId, payload)) {
       console.error("❌ [verifySignature] Firma inválida rechazada.");
       return res.status(401).json({ error: "Firma inválida" });
-    } */
+    }
 
     console.log(`[verifySignature] Firma verificada correctamente.`);
 
