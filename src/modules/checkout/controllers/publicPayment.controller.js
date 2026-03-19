@@ -227,6 +227,14 @@ async function getFreshToken(cardToken, cvv, opts = {}) {
 async function executeMpTransaction(strategy, data) {
   const { planId, token, amount, email, customerId, ref, methodId, installments, description, idempotencyKey, backUrl, userId, merchantId } = data;
 
+  console.log(`\n================= [MP PRE-FLIGHT CHECK] =================`);
+  console.log(`🌍 Estrategia: ${strategy}`);
+  console.log(`💲 Monto: ${amount} (Moneda configurada: ${config.isDev ? "UYU" : "CLP"})`);
+  console.log(`👤 Email: ${email}`);
+  console.log(`💳 Método detectado: ${methodId}`);
+  console.log(`🔑 Token de cuenta usado (Primeros 14 chars): ${config.mpAccessToken ? config.mpAccessToken.substring(0, 14) + '...' : 'MISSING_TOKEN'}`);
+  console.log(`=========================================================\n`);
+
   // CASO A: SUSCRIPCIÓN
   if (strategy === 'subscription') {
     if (!planId) throw new Error("Falta el preapproval_plan_id para la suscripción.");
@@ -252,7 +260,7 @@ async function executeMpTransaction(strategy, data) {
     
     return {
       id: sub.id,
-      status: sub.status, // authorized, pending...
+      status: sub.status, 
       status_detail: "subscription_created",
       transaction_amount: sub.auto_recurring?.transaction_amount || amount,
       currency_id: sub.auto_recurring?.currency_id || (config.isDev ? "UYU" : "CLP"),
