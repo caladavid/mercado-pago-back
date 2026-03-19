@@ -213,7 +213,7 @@ async function processApprovedSubscription(payload) {
     /* console.log("data id:", payload.data.id); */
     const mpSubscription = await getSubscriptionFromMP(payload.data.id);
     console.log(`[mpSubscription] Consultando MP para conocer estado real de la suscripción: ${mpSubscription}...`);
-    const { id, status, external_reference, next_payment_date } = mpSubscription;
+    const { id, status, external_reference, next_payment_date, preapproval_plan_id } = mpSubscription;
     
     console.log(`[MP API]: Suscripción ${id} | Estado: '${status}' | Próximo Cobro: ${next_payment_date || 'N/A'}`);
     const isSynced = await repo.syncSubscription(mpSubscription);
