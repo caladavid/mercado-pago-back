@@ -47,7 +47,6 @@ export const customerRepo = {
 
   // 👤 Historial específico de UN cliente (solo lo que le compró a este Merchant)
   getHistoryByUser: async (merchantId: string, userId: string): Promise<any[]> => {
-    // Aquí limitamos a 50 como ejemplo, o podrías pasarle filtros de paginación también
     const sql = `
       SELECT 
         id, 
@@ -56,14 +55,38 @@ export const customerRepo = {
         status, 
         type, 
         external_reference,
-        created_at
-      FROM public.orders 
-      WHERE merchant_id = $1 AND user_id = $2
-      ORDER BY created_at DESC
+        created_at,
+        o.plan_id,
+        o.mp_payment_id
+      FROM public.orders o
+      WHERE o.merchant_id = $1 AND o.user_id = $2
+      ORDER BY o.created_at DESC
       LIMIT 50
     `;
     
     const { rows } = await pool.query(sql, [merchantId, userId]);
+    return rows;
+  },
+
+  getHistoryByEmail: async (merchantId: string, email: string): Promise<any[]> => {
+    const sql = `
+      SELECT 
+        o.id, 
+        o.total_amount, 
+        o.currency,
+        o.status, 
+        o.type, 
+        o.external_reference,
+        o.created_at,
+        o.plan_id,
+        o.mp_payment_id         
+      FROM public.orders o
+      JOIN public.users u ON o.user_id = u.id
+      WHERE o.merchant_id = $1 AND LOWER(u.email) = LOWER($2)
+      ORDER BY o.created_at DESC
+      LIMIT 50
+    `;
+    const { rows } = await pool.query(sql, [merchantId, email]);
     return rows;
   }
 };

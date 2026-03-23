@@ -43,21 +43,43 @@ export const customerController = {
   getCustomerHistory: async (req: TenantRequest, res: Response): Promise<void> => {
     try {
       const merchantId = req.merchant?.id;
-      const { userId } = req.params;
+      const identifier = (req.params.userId as string);
 
-      console.log(`📍 [CustomerHistory IN] Buscando compras del usuario ${userId} para Merchant:`, merchantId);
+      console.log(`📍 [CustomerHistory IN] Buscando compras del usuario ${identifier} para Merchant:`, merchantId);
 
       if (!merchantId) {
         res.status(401).json({ ok: false, error: "No autorizado" });
         return;
       }
 
-      // LLAMADA AL REPO REAL
-      const data = await customerRepo.getHistoryByUser(merchantId, userId as string);
-      
-      console.log(`📍 [CustomerHistory OUT] Compras encontradas:`, data.length);
+      let allTransactions = [];
 
-      res.json({ ok: true, count: data.length, data });
+      const isEmail = identifier.includes('@');
+
+      if (isEmail) {
+        console.log(`📧 Detectado formato de Email. Buscando por correo...`);
+        allTransactions = await customerRepo.getHistoryByEmail(merchantId, identifier.trim().toLowerCase());
+      } else {
+        console.log(`🆔 Detectado formato de UUID. Buscando por ID...`);
+        allTransactions = await customerRepo.getHistoryByUser(merchantId, identifier);
+      }
+      
+      console.log(`📍 [CustomerHistory OUT] Compras encontradas:`, allTransactions.length);
+
+      const pagos_unicos = allTransactions.filter((tx: any) => 
+        !tx.plan_id && !tx.subscription_id && tx.type !== 'subscription'
+      );
+
+      const suscripciones = allTransactions.filter((tx: any) => 
+        tx.plan_id || tx.subscription_id || tx.type === 'subscription'
+      );
+
+      res.json({ 
+        data: {
+          pagos_unicos,
+          suscripciones
+        }
+      });
 
     } catch (e: any) {
       console.error("❌ Error en getCustomerHistory:", e.message);
