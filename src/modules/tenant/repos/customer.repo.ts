@@ -70,26 +70,27 @@ export const customerRepo = {
 
   getHistoryByEmail: async (merchantId: string, email: string): Promise<any[]> => {
     const sql = `
-      -- 1. Traemos los pagos únicos (One Time) desde tu tabla 'payments'
+      -- 1. Traemos TODOS los eventos de cobro (Pagos únicos + Intentos de suscripción)
       SELECT 
         p.id::text, 
         p.amount::text as total_amount, 
         p.currency,
         p.status, 
-        'one_time' as type, 
+        CASE WHEN p.subscription_id IS NOT NULL THEN 'recurring' ELSE 'one_time' END as type, 
         p.external_reference,
         p.created_at,
-        NULL as plan_id, 
+        NULL as plan_id, -- Mantenemos NULL para que tu controlador lo envíe a la lista de pagos
         p.mp_payment_id
       FROM public.payments p
-      JOIN public.users u ON p.user_id = u.id
-      WHERE p.merchant_id = $1 
-        AND p.subscription_id IS NULL
+      -- Hacemos LEFT JOIN por si el merchant_id o el user_id están en la orden y no en el pago
+      LEFT JOIN public.orders o ON p.order_id = o.id
+      JOIN public.users u ON (p.user_id = u.id OR o.user_id = u.id)
+      WHERE (p.merchant_id = $1 OR o.merchant_id = $1)
         AND LOWER(u.email) = LOWER($2)
 
       UNION ALL
 
-      -- 2. Traemos el estado ACTUAL de cada suscripción desde tu tabla 'subscriptions'
+      -- 2. Traemos el contrato ACTUAL de cada suscripción
       SELECT 
         s.id::text, 
         s.transaction_amount::text as total_amount, 
@@ -99,7 +100,7 @@ export const customerRepo = {
         s.mp_preapproval_id as external_reference,
         s.created_at,
         s.plan_id::text,
-        NULL as mp_payment_id -- Las suscripciones en esta tabla no tienen un payment_id fijo
+        NULL as mp_payment_id
       FROM public.subscriptions s
       JOIN public.users u ON s.user_id = u.id
       WHERE s.merchant_id = $1 
