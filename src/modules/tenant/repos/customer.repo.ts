@@ -70,22 +70,44 @@ export const customerRepo = {
 
   getHistoryByEmail: async (merchantId: string, email: string): Promise<any[]> => {
     const sql = `
+      -- 1. Traemos los pagos únicos (One Time) desde tu tabla 'payments'
       SELECT 
-        o.id, 
-        o.total_amount, 
-        o.currency,
-        o.status, 
-        o.type, 
-        o.external_reference,
-        o.created_at,
-        o.plan_id,
-        o.mp_payment_id         
-      FROM public.orders o
-      JOIN public.users u ON o.user_id = u.id
-      WHERE o.merchant_id = $1 AND LOWER(u.email) = LOWER($2)
-      ORDER BY o.created_at DESC
-      LIMIT 50
+        p.id::text, 
+        p.amount::text as total_amount, 
+        p.currency,
+        p.status, 
+        'one_time' as type, 
+        p.external_reference,
+        p.created_at,
+        NULL as plan_id, 
+        p.mp_payment_id
+      FROM public.payments p
+      JOIN public.users u ON p.user_id = u.id
+      WHERE p.merchant_id = $1 
+        AND p.subscription_id IS NULL
+        AND LOWER(u.email) = LOWER($2)
+
+      UNION ALL
+
+      -- 2. Traemos el estado ACTUAL de cada suscripción desde tu tabla 'subscriptions'
+      SELECT 
+        s.id::text, 
+        s.transaction_amount::text as total_amount, 
+        s.currency,
+        s.status, 
+        'subscription' as type, 
+        s.mp_preapproval_id as external_reference,
+        s.created_at,
+        s.plan_id::text,
+        NULL as mp_payment_id -- Las suscripciones en esta tabla no tienen un payment_id fijo
+      FROM public.subscriptions s
+      JOIN public.users u ON s.user_id = u.id
+      WHERE s.merchant_id = $1 
+        AND LOWER(u.email) = LOWER($2)
+
+      ORDER BY created_at DESC;
     `;
+    
     const { rows } = await pool.query(sql, [merchantId, email]);
     return rows;
   }
