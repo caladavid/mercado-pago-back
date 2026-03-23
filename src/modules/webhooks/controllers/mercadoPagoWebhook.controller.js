@@ -121,7 +121,19 @@ async function receiveMercadoPagoWebhook(req, res, next) {
     res.status(200).json({ ok: true, id: dbId, message: "Evento encolado para procesamiento" });
 
     processEventBackground(payload.type, payload)
-      .catch(err => console.error("[processEventBackground] Error en procesamiento de fondo:", err));
+      .then(async () => {
+        if (dbId !== 'bypass_simulado') {
+          await repo.updateWebhookStatus(dbId, "completed");
+          console.log(`[Webhook DB] Evento ${dbId} marcado como 'completed'.`);
+        }
+      })
+      .catch(async (error) => {
+        console.error("[processEventBackground] Error en procesamiento de fondo:", error);
+        if (dbId !== 'bypass_simulado'){
+          await repo.updateWebhookStatus(dbId, "failed");
+          console.error(`[Webhook DB] Evento ${dbId} marcado como 'failed'.`);
+        }
+      });
 
   } catch (error) {
     if (!res.headersSent) {

@@ -34,6 +34,19 @@ async function insertWebhookEvent(
   return rows[0];
 }
 
+async function updateWebhookStatus(dbId, status) {
+  try {
+    const result = await pool.query(
+      `UPDATE webhook_events SET processing_status = $1 WHERE id = $2 RETURNING *`,
+      [status, dbId]
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error("Error actualizando status del webhook:", error);
+    return null;
+  }
+}
+
 async function updateOrderStatusByPaymentId(externalReference, mpStatus, paymentId) {
   const nextOrderStatus = (() => {
       if (mpStatus === "approved") return "paid";
@@ -212,5 +225,6 @@ async function syncSubscription(mpSubscription) {
 module.exports = { 
   insertWebhookEvent,
   updateOrderStatusByPaymentId,
-  syncSubscription
+  syncSubscription,
+  updateWebhookStatus
 };
