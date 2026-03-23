@@ -79,10 +79,13 @@ export const customerRepo = {
         CASE WHEN p.subscription_id IS NOT NULL THEN 'recurring' ELSE 'one_time' END as type, 
         p.external_reference,
         p.created_at,
-        NULL as plan_id, -- Mantenemos NULL para que tu controlador lo envíe a la lista de pagos
-        p.mp_payment_id
+        NULL as plan_id, 
+        p.mp_payment_id,
+        p.payment_type_id,
+        NULL as reason,
+        NULL as frequency,
+        NULL as frequency_type
       FROM public.payments p
-      -- Hacemos LEFT JOIN por si el merchant_id o el user_id están en la orden y no en el pago
       LEFT JOIN public.orders o ON p.order_id = o.id
       JOIN public.users u ON (p.user_id = u.id OR o.user_id = u.id)
       WHERE (p.merchant_id = $1 OR o.merchant_id = $1)
@@ -100,7 +103,11 @@ export const customerRepo = {
         s.mp_preapproval_id as external_reference,
         s.created_at,
         s.plan_id::text,
-        NULL as mp_payment_id
+        NULL as mp_payment_id,
+        NULL as payment_type_id,
+        s.reason,
+        s.frequency,
+        s.frequency_type
       FROM public.subscriptions s
       JOIN public.users u ON s.user_id = u.id
       WHERE s.merchant_id = $1 
