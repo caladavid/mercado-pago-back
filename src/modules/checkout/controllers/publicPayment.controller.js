@@ -21,6 +21,8 @@ const PayBodySchema = z.object({
   mp_card_token: z.string().min(10).optional(),
   mp_registration_token: z.string().optional(),
   back_url: z.string().url().optional(),
+  success_url: z.string().url().optional(),
+  error_url: z.string().url().optional(),
   token: z.string().min(10).optional(),
   card_id: z.string().optional(),
   save_card: z.boolean().optional(),
@@ -58,6 +60,8 @@ async function fetchAndValidateOrder(tx, externalReference, payerData){
         o.external_reference,
         o.type,
         o.back_url,
+        o.success_url, 
+        o.error_url,
         u.id as user_id,
         p.mp_preapproval_plan_id,
         u.email,
@@ -601,6 +605,9 @@ async function payCheckout(req, res, next) {
     const txStatus = result.transactionResult.status;
     const isRejected = result.isRejected;
 
+    const successRedirect = orderRow.success_url || orderRow.back_url || null;
+    const errorRedirect = orderRow.error_url || orderRow.back_url || null;
+
     // Si es rechazado, devolvemos HTTP 400 y ok: false
     if (isRejected) {
       return res.status(400).json({
@@ -612,7 +619,8 @@ async function payCheckout(req, res, next) {
           status: txStatus,
           status_detail: result.transactionResult.status_detail,
           type: result.transactionResult.payment_type_id
-        }
+        },
+        redirect_url: errorRedirect
       });
     }
 
@@ -625,7 +633,7 @@ async function payCheckout(req, res, next) {
         type: result.transactionResult.payment_type_id,
         external_reference: externalReference
       },
-      back_url: result.backUrl
+      redirect_url: successRedirect
     });
   } catch (e) {
     console.error("=========================================");

@@ -14,7 +14,7 @@ exports.createCheckout = async (req, res, next) => {
     console.log("merchantSlug", merchantSlug);
     console.log("merchantId", merchantId);
 
-    const { buyer, item, type, preapproval_plan_id, back_url } = req.body || {};
+    const { buyer, item, type, preapproval_plan_id, back_url, success_url, error_url } = req.body || {};
 
     if (!buyer?.email) return res.status(400).json({ error: "buyer.email required" });
     if (!item?.sku || !item?.title) return res.status(400).json({ error: "item.sku and item.title required" });
@@ -67,7 +67,9 @@ exports.createCheckout = async (req, res, next) => {
         merchantSlug,
         type,
         planId: localPlanId,
-        back_url
+        back_url,
+        success_url,
+        error_url
       });
 
       await repo.createOrderItem(client, {

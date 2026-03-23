@@ -45,6 +45,8 @@ exports.getCheckout = async (req, res, next) => {
       frequency: order.frequency,
       frequency_type: order.frequency_type,
       back_url: order.back_url,
+      success_url: order.success_url,
+      error_url: order.error_url,
       order: {
         id: order.id,
         status: order.status,

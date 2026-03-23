@@ -19,20 +19,26 @@ export interface DispatcherResponse {
   error?: string;
 }
 
-export async function notifyMerchants(tenantUrl: string, payload: EnrollmentPayload, secretToken: string): Promise<DispatcherResponse> {
+export async function notifyMerchants(tenantUrl: string, payload: EnrollmentPayload, secretToken: string, authToken?: string): Promise<DispatcherResponse> {
     try {
-        
         const signature = crypto
             .createHmac('sha256', secretToken)
             .update(JSON.stringify(payload))
             .digest('hex');
 
+            
+        const requestHeaders: Record<string, string> = {
+            'X-Signature': signature,
+            'Content-Type': 'application/json',
+            'User-Agent': 'MP-Payment/1.0',
+        }
+
+        if (authToken) {
+            requestHeaders['Authorization'] = `Bearer ${authToken}` 
+        }
+
         const response = await axios.post(tenantUrl, payload, {
-            headers: {
-                'X-Signature': signature,
-                'Content-Type': 'application/json',
-                'User-Agent': 'MP-Payment/1.0'
-            },
+            headers: requestHeaders,
             timeout: 5000 
         });
 
