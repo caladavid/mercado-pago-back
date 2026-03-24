@@ -591,12 +591,16 @@ async function payCheckout(req, res, next) {
 
 
         const finalBackUrl = back_url || orderRow.back_url;
+        const successRedirect = orderRow.success_url || orderRow.back_url || null;
+        const errorRedirect = orderRow.error_url || orderRow.back_url || null;
 
         return {
           transactionResult,
           isRejected,
           backUrl: finalBackUrl,
           order_id: orderRow.order_id,
+          successRedirect, 
+          errorRedirect    
       };
     });
 
@@ -605,8 +609,8 @@ async function payCheckout(req, res, next) {
     const txStatus = result.transactionResult.status;
     const isRejected = result.isRejected;
 
-    const successRedirect = orderRow.success_url || orderRow.back_url || null;
-    const errorRedirect = orderRow.error_url || orderRow.back_url || null;
+    const successRedirect = result.successRedirect;
+    const errorRedirect = result.errorRedirect;
 
     // Si es rechazado, devolvemos HTTP 400 y ok: false
     if (isRejected) {
