@@ -26,11 +26,8 @@ export const customerController = {
       
       console.log(`📍 [CustomerController OUT] Clientes encontrados:`, data.length);
 
-      // 🚨 ¡Adiós al data: [] quemado!
-      res.json({ 
-        ok: true, 
-        count: data.length, 
-        data: data 
+      res.json({  
+        data 
       });
 
     } catch (e: any) {

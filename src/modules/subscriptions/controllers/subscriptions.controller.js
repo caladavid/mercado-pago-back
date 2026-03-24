@@ -221,31 +221,53 @@ async function cancelSubscription(req, res, next) {
     }
 }
 
-/* async function cancelSubscription(req, res, next) {
+async function listSubscriptions(req, res, next) {
     try {
-    const { subscriptionId } = req.params;
+        const merchantId = req.merchant?.id;
 
+        if (!merchantId) {
+            return res.status(401).json({ ok: false, error: "No autorizado" });
+        }
+
+        // Llamamos al repo para traer las suscripciones de este merchant
+        const data = await repo.getSubscriptionsByMerchant(merchantId);
+
+        console.log(`📍 [Subscriptions OUT] Encontradas:`, data.length);
+
+        // Devolvemos el array directamente para que el frontend lo lea fácil
+        res.json(data);
+    } catch (error) {
+        console.error("❌ Error en listSubscriptions:", error);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+}
+
+async function getSubscriptionById(req, res, next) {
     try {
-      // 1. Llamamos a Mercado Pago
-      const mpResult = await mpClient.cancelPreApproval(subscriptionId);
-      
-      // 2. Si MP dice ok, actualizamos nuestra DB usando la nueva función
-      await repo.updateStatus(subscriptionId, "cancelled", mpResult);
-      
-      return res.json({ ok: true, message: "Suscripción cancelada." });
+        const merchantId = req.merchant?.id;
+        const { id } = req.params; // Puede ser tu ID local o el de MP
+
+        if (!merchantId) {
+            return res.status(401).json({ ok: false, error: "No autorizado" });
+        }
+
+        console.log(`🔍 [Subs Controller] Buscando suscripción: ${id}`);
+
+        // Aquí asumo que tu repo tiene una función para buscar por ID
+        // Si usas el ID de Mercado Pago, usa getSubscriptionByMPId
+        const subscription = await repo.getSubscriptionByMPId(id);
+
+        if (!subscription || subscription.merchant_id !== merchantId) {
+            return res.status(404).json({ ok: false, error: "Suscripción no encontrada" });
+        }
+
+        res.json(subscription);
 
     } catch (error) {
-      // Manejo del error 400 (ya estaba cancelada en MP)
-      if (error.status === 400 && error.payload?.message?.includes("cancelled")) {
-          // Sincronizamos aunque MP falle, porque ya está cancelada allá
-          await repo.updateStatus(subscriptionId, "cancelled");
-          return res.json({ ok: true, message: "Ya estaba cancelada, DB sincronizada." });
-      }
-      throw error;
+        console.error("❌ Error en getSubscriptionById:", error);
+        res.status(500).json({ ok: false, error: error.message });
     }
-  } catch (error) {
-    next(error);
-  }
-} */
+}
 
-module.exports = { createAdHocSubscription, createSubscriptionFromPlan, processSubscriptionLogic, cancelSubscription };
+module.exports = { createAdHocSubscription, createSubscriptionFromPlan, processSubscriptionLogic, cancelSubscription, listSubscriptions, 
+    getSubscriptionById, };

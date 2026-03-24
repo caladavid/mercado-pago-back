@@ -50,8 +50,6 @@ export const transactionController = {
     );
 
       res.json({ 
-        ok: true, 
-        count: allTransactions?.length || 0, 
         data: {
           pagos_unicos,
           suscripciones
@@ -89,7 +87,7 @@ export const transactionController = {
       console.log(`📍 [TransactionDetail OUT] Compra encontrada con éxito.`);
       
       // Devolvemos el objeto real
-      res.json({ ok: true, data });
+      res.json(data);
       
     } catch (e: any) {
       console.error("❌ Error en getTransactionDetail:", e.message);

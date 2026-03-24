@@ -123,7 +123,18 @@ async function createSubscription({
  */
 async function getSubscriptionByMPId(subscriptionId) {
     const query = `
-        SELECT id, user_id, merchant_id, status 
+        SELECT 
+            id, 
+            user_id, 
+            merchant_id, 
+            status, 
+            mp_preapproval_id, 
+            reason, 
+            transaction_amount AS amount, 
+            currency, 
+            next_billing_at AS next_payment_date, 
+            created_at,
+            updated_at
         FROM subscriptions 
         WHERE mp_preapproval_id = $1 
         LIMIT 1
@@ -198,4 +209,37 @@ async function updateNextBillingDate(mpPreapprovalId, nextPaymentDate) {
     }
 }
 
-module.exports = { createSubscription, getSubscriptionByMPId, updateStatus, updateNextBillingDate };
+/**
+ * Obtiene todas las suscripciones asociadas a un Merchant específico.
+ * Se usa para llenar la tabla del Dashboard de Administración (Subscriptions.tsx).
+ */
+async function getSubscriptionsByMerchant(merchantId) {
+    const query = `
+        SELECT 
+            id, 
+            mp_preapproval_id, 
+            user_id, 
+            plan_id, 
+            status, 
+            reason, 
+            transaction_amount AS amount, 
+            currency, 
+            next_billing_at AS next_payment_date, 
+            created_at
+        FROM subscriptions 
+        WHERE merchant_id = $1
+        ORDER BY created_at DESC
+    `;
+
+    try {
+        const { rows } = await pool.query(query, [merchantId]);
+        return rows;
+    } catch (error) {
+        console.error("💥 [Repo] Error obteniendo suscripciones por merchant:", error.message);
+        throw error;
+    }
+}
+
+module.exports = { createSubscription, getSubscriptionByMPId, updateStatus, updateNextBillingDate, 
+    getSubscriptionsByMerchant
+ };

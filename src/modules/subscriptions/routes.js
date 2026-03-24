@@ -6,6 +6,8 @@ const merchantAuth = mw.merchantAuth;
 
 const router = express.Router();
 
+router.get("/", merchantAuth, controller.listSubscriptions);
+router.get("/:id", merchantAuth, controller.getSubscriptionById);
 // Opción A: Flexible, calculada al vuelo (La que usarás el 90% del tiempo si hay descuentos)
 router.post("/ad-hoc", controller.createAdHocSubscription);
 

@@ -41,11 +41,7 @@ async function createPlan(req, res, next) {
             raw_mp: mpPlan
         });
 
-        res.status(201).json({
-            ok: true,
-            message: "Plan creado y sincronizado exitosamente",
-            plan: savedPlan
-        });
+        res.status(200).json(plans);
     } catch (error) {
         console.error("❌ Error en createPlan:", error);
         res.status(400).json({ ok: false, error: error.message });
@@ -84,7 +80,7 @@ async function getPlan(req, res, next) {
             return res.status(404).json({ ok: false, error: "Plan no encontrado o no tienes permisos." });
         }
 
-        res.status(200).json({ ok: true, plan });
+        res.status(200).json(plan);
     } catch (error) {
         console.error("❌ Error en getPlan:", error);
         res.status(500).json({ ok: false, error: error.message });
