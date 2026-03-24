@@ -14,24 +14,45 @@ exports.createCheckout = async (req, res, next) => {
     console.log("merchantSlug", merchantSlug);
     console.log("merchantId", merchantId);
 
-    const { buyer, item, type, preapproval_plan_id, back_url, success_url, error_url } = req.body || {};
+    const { buyer, type, preapproval_plan_id, back_url, success_url, error_url } = req.body || {};
+    let { item } = req.body || {};
 
     if (!buyer?.email) return res.status(400).json({ error: "buyer.email required" });
-    if (!item?.sku || !item?.title) return res.status(400).json({ error: "item.sku and item.title required" });
-    if (item?.amount == null || Number(item.amount) <= 0) return res.status(400).json({ error: "item.amount must be > 0" });
-    if (!item?.currency) return res.status(400).json({ error: "item.currency required (e.g. UYU)" });
+    
+    if (type !== "subscription") {
+      if (!item?.sku || !item?.title) return res.status(400).json({ error: "item.sku and item.title required" });
+      if (item?.amount == null || Number(item.amount) <= 0) return res.status(400).json({ error: "item.amount must be > 0" });
+      if (!item?.currency) return res.status(400).json({ error: "item.currency required (e.g. UYU)" });
+    } else {
+      if (!preapproval_plan_id) return res.status(400).json({ error: "preapproval_plan_id required for subscriptions" });
+    }
 
     const result = await withTransaction(async (client) => {
       let localPlanId = null;
 
-      if (type === 'subscription' && preapproval_plan_id) {
-        const planQuery = `SELECT id FROM plans WHERE mp_preapproval_plan_id = $1`;
+      if (type === 'subscription') {
+        const planQuery = `SELECT id, name, amount, currency FROM plans WHERE mp_preapproval_plan_id = $1`;
         const { rows } = await client.query(planQuery, [preapproval_plan_id]);
 
-        if (rows.length > 0) {
-          localPlanId = rows[0].id; 
-          console.log("✅ Plan Local Encontrado (UUID):", localPlanId);
+        if (rows.length === 0) {
+            const err = new Error("El plan especificado no existe en la base de datos");
+            err.status = 404;
+            throw err;
         }
+
+        if (rows.length > 0) {
+        }
+        const planDb = rows[0];
+        localPlanId = planDb.id; 
+        console.log("✅ Plan Local Encontrado (UUID):", localPlanId);
+
+        item = {
+            sku: `PLAN-${preapproval_plan_id.substring(0, 8)}`, // Generamos un SKU automático
+            title: planDb.name,
+            amount: planDb.amount,
+            currency: planDb.currency,
+            description: `Renovación automática - ${planDb.name}`
+        };
       }
 
       const user = await repo.upsertUser(client, {
