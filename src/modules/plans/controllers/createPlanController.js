@@ -57,7 +57,7 @@ async function listPlans(req, res, next) {
 
         const plans = await repo.getPlansByMerchant(merchantId);
 
-        res.status(200).json({ ok: true, count: plans.length, data: plans });
+        res.status(200).json(plans);
     } catch (error) {
         console.error("❌ Error en listPlans:", error);
         res.status(500).json({ ok: false, error: error.message });
@@ -81,6 +81,29 @@ async function getPlan(req, res, next) {
         }
 
         res.status(200).json(plan);
+    } catch (error) {
+        console.error("❌ Error en getPlan:", error);
+        res.status(500).json({ ok: false, error: error.message });
+    }
+}
+
+async function getSubscriptionsByPlan(req, res, next) {
+    try {
+        const merchantId = req.merchant?.id;
+        const { id } = req.params;
+
+        if (!merchantId) {
+            return res.status(401).json({ error: "No autorizado" });
+        }
+
+        // Usamos la función de seguridad doble que ya habíamos creado en el repo
+        const subscriptions = await repo.getSubscriptionsByPlan(id, merchantId);
+
+        if (!subscriptions) {
+            return res.status(404).json({ ok: false, error: "Suscripciones no encontrada o no tienes permisos." });
+        }
+
+        res.status(200).json(subscriptions);
     } catch (error) {
         console.error("❌ Error en getPlan:", error);
         res.status(500).json({ ok: false, error: error.message });
@@ -116,4 +139,4 @@ async function cancelPlan(req, res, next) {
     }
 }
 
-module.exports = { createPlan, listPlans, cancelPlan, getPlan };
+module.exports = { createPlan, listPlans, cancelPlan, getPlan, getSubscriptionsByPlan };

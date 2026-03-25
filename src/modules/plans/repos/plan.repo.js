@@ -94,9 +94,21 @@ async function updatePlanStatus(id, merchant_id, status) {
     }
 }
 
+async function getSubscriptionsByPlan(planId, merchantId) {
+    const query = `
+        SELECT * FROM subscriptions 
+        WHERE plan_id = $1 AND merchant_id = $2
+        ORDER BY created_at DESC
+    `;
+    
+    const { rows } = await pool.query(query, [planId, merchantId]);
+    return rows;
+}
+
 module.exports = { 
     createPlan, 
     getPlansByMerchant, 
     getPlanByIdAndMerchant, 
-    updatePlanStatus 
+    updatePlanStatus,
+    getSubscriptionsByPlan,
 };
