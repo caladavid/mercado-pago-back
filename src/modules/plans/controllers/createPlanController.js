@@ -41,7 +41,7 @@ async function createPlan(req, res, next) {
             raw_mp: mpPlan
         });
 
-        res.status(200).json(plans);
+        res.status(200).json(savedPlan);
     } catch (error) {
         console.error("❌ Error en createPlan:", error);
         res.status(400).json({ ok: false, error: error.message });
