@@ -161,7 +161,15 @@ async function ensureMpCustomer(tx, userId, payerData, rowData, idempotencyKey) 
   // 3. SI NO EXISTE, LO CREAMOS (CON CUIDADO)
 if (!customerId) {
   const { first: dbFirst, last: dbLast } = splitName(rowData.full_name || "");
-  const first_name = (payerData.first_name || dbFirst || "Nombre").trim();
+
+  let cleanFirst = (payerData.first_name || dbFirst || "Cliente").trim().replace(/[^a-zA-ZñÑáéíóúÁÉÍÓÚ\s]/g, "");
+  let cleanLast = (payerData.last_name || dbLast || "Genérico").trim().replace(/[^a-zA-ZñÑáéíóúÁÉÍÓÚ\s]/g, "");
+
+  // Si cleanLast quedó muy corto o vacío, usamos un apellido por defecto.
+  if (cleanFirst.length < 2) cleanFirst = "Cliente";
+  if (!cleanLast || cleanLast.length < 2) cleanLast = "Usuario";
+
+  /* const first_name = (payerData.first_name || dbFirst || "Nombre").trim(); */
 
   // 🔥🔥🔥 EL BYPASS 🔥🔥🔥
   if (payerEmail.includes("@testuser.com")) {
@@ -176,7 +184,12 @@ if (!customerId) {
       // --- LÓGICA NORMAL PARA USUARIOS REALES (GMAIL, ETC) ---
       console.log("✨ Creando nuevo Customer Real en MP...");
       try {
-          const payload = { email: payerEmail, first_name, /* ... */ };
+          const payload = { 
+            email: payerEmail, 
+            first_name: cleanFirst, 
+            last_name: cleanLast
+          };
+
           let newCustomer;
           if (isSubscription) {
              newCustomer = await createSubscriptionCustomer(payload, { idempotencyKey });
@@ -192,7 +205,6 @@ if (!customerId) {
 }
 
   // 4. Guardar en DB Local
-  // (Nota: Si vas a manejar 2 cuentas, considera agregar una columna 'mp_account_type' en esta tabla a futuro)
   await mpCustomersRepo.insertMpCustomer(
     {
       user_id: userId || null,
