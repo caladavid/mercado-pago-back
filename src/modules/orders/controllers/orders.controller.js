@@ -19,14 +19,11 @@ async function getPaymentStatus(req, res, next) {
         }
 
         res.json({
-        ok: true,
-        data: {
             status: order.status,
             type: order.type,
             amount: order.total_amount,
             currency: order.currency,
             ref: order.external_reference 
-        }
         });
     } catch (error) {
         res.status(500).json({ ok: false, error: error.message });

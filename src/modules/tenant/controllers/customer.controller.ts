@@ -72,10 +72,8 @@ export const customerController = {
       );
 
       res.json({ 
-        data: {
           pagos_unicos,
           suscripciones
-        }
       });
 
     } catch (e: any) {
