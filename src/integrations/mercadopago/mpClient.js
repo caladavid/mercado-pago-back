@@ -472,7 +472,7 @@ async function cancelPreApproval(preapprovalId) {
 }
 
 async function updatePreApprovalPlan(planId, payload) {
-  console.log(`🚫 [MP Client] Actualizando/Cancelando Plan Base: ${planId}`);
+  console.log(`🚫 [MP Client] Actualizando Plan Base: ${planId}`);
   
   return mpRequest(
     "PUT", 
@@ -503,5 +503,5 @@ module.exports = {
   searchSubscriptionCustomerByEmail,
   createSubscriptionCustomer,
   cancelPreApproval,
-  updatePreApprovalPlan
+  updatePreApprovalPlan,
 };

@@ -139,4 +139,58 @@ async function cancelPlan(req, res, next) {
     }
 }
 
-module.exports = { createPlan, listPlans, cancelPlan, getPlan, getSubscriptionsByPlan };
+async function updatePlan(req, res, next) {
+    try {
+        const { id } = req.params; // ¡AQUÍ ESTÁ EL CAMBIO! Ahora recibes tu UUID interno.
+        const { reason, amount, frequency, frequency_type, status } = req.body;
+        const merchantId = req.merchant?.id;
+
+        // 1. Buscar el Plan en TU base de datos primero
+        const localPlan = await repo.getPlanById(id, merchantId);
+        console.log("localPlan", localPlan);
+        
+        if (!localPlan) {
+            return res.status(404).json({ ok: false, error: "Plan local no encontrado o no pertenece a este comercio." });
+        }
+
+        const mpPlanId = localPlan.mp_preapproval_plan_id; // Extraemos el ID real de MP
+        console.log("mpClient", mpClient);
+        // 2. Armar Payload para Mercado Pago
+        const mpPayload = {};
+        if (reason) mpPayload.reason = reason;
+        if (status) mpPayload.status = status;
+
+        if (amount || frequency || frequency_type) {
+            mpPayload.auto_recurring = {
+                ...(amount && { transaction_amount: parseFloat(amount) }),
+                ...(frequency && { frequency: parseInt(frequency) }),
+                ...(frequency_type && { frequency_type: frequency_type })
+            };
+        }
+
+        // 3. Llamada a Mercado Pago (usando el ID extraído)
+        let mpResult = localPlan.raw_mp; // Por defecto mantenemos el JSON viejo
+        
+        if (Object.keys(mpPayload).length > 0) {
+            mpResult = await mpClient.updatePreApprovalPlan(mpPlanId, mpPayload);
+        }
+
+        // 4. Actualizar BD Local usando TU UUID interno
+        const updatedPlan = await repo.updatePlanById(id, merchantId, {
+            reason,
+            amount,
+            frequency,
+            frequency_type,
+            status,
+            rawMp: mpResult 
+        });
+
+        res.json({ updatedPlan });
+    } catch (error) {
+        console.error("❌ Error en updatePlan:", error);
+        res.status(400).json({ ok: false, error: error.message, details: error.payload });
+    }
+}
+
+
+module.exports = { createPlan, listPlans, cancelPlan, getPlan, getSubscriptionsByPlan , updatePlan};

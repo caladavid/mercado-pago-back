@@ -105,10 +105,50 @@ async function getSubscriptionsByPlan(planId, merchantId) {
     return rows;
 }
 
+/**
+ * Busca un plan por el UUID interno de Celcom.
+ */
+async function getPlanById(id, merchantId) {
+    const query = `SELECT * FROM plans WHERE id = $1 AND merchant_id = $2 LIMIT 1`;
+    const { rows } = await pool.query(query, [id, merchantId]);
+    return rows[0] || null;
+}
+
+/**
+ * Actualiza los campos de un Plan usando el UUID interno.
+ */
+async function updatePlanById(id, merchantId, fields) {
+    const { reason, amount, frequency, frequency_type, status, rawMp } = fields;
+
+    const query = `
+        UPDATE plans 
+        SET 
+            name = COALESCE($1, name),
+            amount = COALESCE($2, amount),
+            interval_count = COALESCE($3, interval_count),
+            interval_unit = COALESCE($4, interval_unit),
+            status = COALESCE($5, status),
+            raw_mp = COALESCE($6, raw_mp),
+            updated_at = NOW()
+        WHERE id = $7 AND merchant_id = $8
+        RETURNING *;
+    `;
+
+    const values = [
+        reason, amount, frequency, frequency_type, status, rawMp,
+        id, merchantId // <-- Usamos tu UUID aquí
+    ];
+
+    const { rows } = await pool.query(query, values);
+    return rows[0] || null;
+}
+
 module.exports = { 
     createPlan, 
     getPlansByMerchant, 
     getPlanByIdAndMerchant, 
     updatePlanStatus,
     getSubscriptionsByPlan,
+    getPlanById,
+    updatePlanById
 };
