@@ -142,7 +142,7 @@ async function cancelPlan(req, res, next) {
 async function updatePlan(req, res, next) {
     try {
         const { id } = req.params; // ¡AQUÍ ESTÁ EL CAMBIO! Ahora recibes tu UUID interno.
-        const { reason, amount, frequency, frequency_type, status } = req.body;
+        const { reason, amount, frequency, frequency_type, status, back_url } = req.body;
         const merchantId = req.merchant?.id;
 
         // 1. Buscar el Plan en TU base de datos primero
@@ -159,6 +159,7 @@ async function updatePlan(req, res, next) {
         const mpPayload = {};
         if (reason) mpPayload.reason = reason;
         if (status) mpPayload.status = status;
+        if (back_url) mpPayload.back_url = back_url;
 
         if (amount || frequency || frequency_type) {
             mpPayload.auto_recurring = {
