@@ -5,6 +5,7 @@ const subscriptionRoutes = require("../modules/subscriptions/routes");
 const planRoutes = require("../modules/plans/routes");
 const orderRoutes = require("../modules/orders/routes");
 const tenantRoutes = require("../modules/tenant/routes");
+const logsRoutes = require("../modules/logs/routes");
 
 
 const router = express.Router();
@@ -22,6 +23,7 @@ router.use("/subscriptions", subscriptionRoutes);
 router.use('/plans', planRoutes);
 router.use('/orders', orderRoutes);
 router.use('/tenant', tenantRoutes);
+router.use('/logs', logsRoutes);
 
 // Ejemplo: POST /api/ping (merchant)
 router.post("/ping", merchantAuth, (req, res) => {
