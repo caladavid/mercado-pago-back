@@ -4,6 +4,13 @@ const { withTransaction } = require("../../../shared/db/withTransaction");
 const repo = require("../repos/checkout.repo");
 const mpRepo = require("../repos/mpCustomers.repo");
 
+const appendQueryParam = (url, key, value) => {
+  if (!url) return url;
+
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}${key}=${value}`;
+}
+
 exports.createCheckout = async (req, res, next) => {
   console.log(`[createCheckout] Iniciando orden para: ${req.body?.buyer?.email} | SKU: ${req.body?.item?.sku}`);
   try {
@@ -14,7 +21,7 @@ exports.createCheckout = async (req, res, next) => {
     console.log("merchantSlug", merchantSlug);
     console.log("merchantId", merchantId);
 
-    const { buyer, type, preapproval_plan_id, back_url, success_url, error_url } = req.body || {};
+    const { buyer, type, preapproval_plan_id, back_url, success_url, error_url, txnId } = req.body || {};
     let { item } = req.body || {};
 
     if (!buyer?.email) return res.status(400).json({ error: "buyer.email required" });
@@ -26,6 +33,11 @@ exports.createCheckout = async (req, res, next) => {
     } else {
       if (!preapproval_plan_id) return res.status(400).json({ error: "preapproval_plan_id required for subscriptions" });
     }
+
+    let finalBackUrl = back_url;
+    let finalSuccessUrl = success_url;
+
+    
 
     const result = await withTransaction(async (client) => {
       let localPlanId = null;
@@ -53,6 +65,13 @@ exports.createCheckout = async (req, res, next) => {
             currency: planDb.currency,
             description: `Renovación automática - ${planDb.name}`
         };
+      }
+
+      if (merchantSlug.includes("comerciante-contenido") && txnId) {
+        console.log(`[Merchant Contenido] Inyectando txn_id (${txnId}) en las URLs de retorno.`);
+        
+        finalBackUrl = appendQueryParam(finalBackUrl, 'txn_id', txnId);
+        finalSuccessUrl = appendQueryParam(finalSuccessUrl, 'txn_id', txnId);
       }
 
       const user = await repo.upsertUser(client, {
@@ -88,8 +107,8 @@ exports.createCheckout = async (req, res, next) => {
         merchantSlug,
         type,
         planId: localPlanId,
-        back_url,
-        success_url,
+        back_url: finalBackUrl,
+        success_url: finalSuccessUrl,
         error_url
       });
 
