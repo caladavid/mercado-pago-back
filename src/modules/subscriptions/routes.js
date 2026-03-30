@@ -15,5 +15,6 @@ router.post("/ad-hoc", controller.createAdHocSubscription);
 router.post("/plan", merchantAuth, controller.createSubscriptionFromPlan);
 
 router.put("/:id/cancel", merchantAuth, controller.cancelSubscription);
+router.put("/cancel-by-plan", merchantAuth, controller.cancelSubscriptionByPlan);
 
 module.exports = router;

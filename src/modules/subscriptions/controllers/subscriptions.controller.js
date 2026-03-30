@@ -227,6 +227,92 @@ async function cancelSubscription(req, res, next) {
     }
 }
 
+async function cancelSubscriptionByPlan(req, res, next) {
+    try {
+        const authenticatedMerchantId = req.merchant?.id;
+        const { email, preapproval_plan_id } = req.body;
+
+        // 1. Validar autenticación
+        if (!authenticatedMerchantId) {
+            return res.status(401).json({ ok: false, error: "No autorizado." });
+        }
+
+        // 2. Validar que vengan los datos requeridos
+        if (!email) {
+            return res.status(400).json({ 
+                ok: false, 
+                error: "Faltan parámetros. Se requiere 'email'" 
+            });
+        }
+        
+        if (!preapproval_plan_id) {
+            return res.status(400).json({ 
+                ok: false, 
+                error: "Faltan parámetros. Se requiere 'preapproval_plan_id'." 
+            });
+        }
+
+        console.log(`[cancelSubscriptionByPlan] Merchant ${authenticatedMerchantId} buscando plan: ${preapproval_plan_id} para email: ${email}`);
+
+        // 3. Buscar la suscripción ACTIVA en la Base de Datos
+        const subscription = await repo.getActiveSubscriptionByEmailAndPlan(email, preapproval_plan_id, authenticatedMerchantId);
+
+        if (!subscription) {
+            return res.status(404).json({ 
+                ok: false, 
+                error: "No se encontró ninguna suscripción activa para este correo y plan." 
+            });
+        }
+
+        const mpPreapprovalId = subscription.mp_preapproval_id;
+
+        // 4. Cancelar en Mercado Pago
+        console.log(`📡 [CancelByPlan MP] Encontrado MP ID: ${mpPreapprovalId}. Cancelando en Mercado Pago...`);
+        const mpResult = await mpClient.cancelPreApproval(mpPreapprovalId).catch(err => {
+            // Manejamos si ya estaba cancelada en MP
+            if (err.status === 400 && err.payload?.message?.includes("cancelled")) {
+                console.log(`⚠️ [CancelByPlan MP] La suscripción ya estaba cancelada en Mercado Pago.`);
+                return { alreadyCancelled: true }; 
+            }
+            throw err; 
+        });
+
+        // 5. Actualizar la Base de Datos al estado 'cancelled'
+        const rawPayload = mpResult.alreadyCancelled ? null : mpResult;
+        
+        // Asumiendo que updateStatus usa el ID de MP o tu UUID interno (ajusta el primer parámetro según tu repo)
+        await repo.updateStatus(mpPreapprovalId, "cancelled", rawPayload);
+        console.log("Intentando actualizar DB con ID:", mpPreapprovalId);
+
+        const message = mpResult.alreadyCancelled 
+            ? "La suscripción ya figuraba como cancelada en Mercado Pago." 
+            : "Suscripción cancelada exitosamente.";
+
+        console.log(`✅ [CancelByPlan OUT] ${message}`);
+        return res.json({ 
+            ok: true, 
+            message: "Suscripción cancelada exitosamente.",
+            data: {
+                subscription: {
+                    id: subscription.subscription_id,          // ID Tabla Celcom
+                    plan_id: subscription.internal_plan_id,    // ID Plan Celcom
+                    mp_preapproval_id: subscription.mp_preapproval_id, // ID Mercado Pago
+                    name: subscription.subscription_name
+                },
+                user: {
+                    id: subscription.user_id,
+                    name: subscription.user_name,
+                    email: subscription.user_email
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error("❌ Error en cancelSubscriptionByPlan:", error);
+        next(error);
+    }
+}
+
 async function listSubscriptions(req, res, next) {
     try {
         const merchantId = req.merchant?.id;
@@ -276,4 +362,4 @@ async function getSubscriptionById(req, res, next) {
 }
 
 module.exports = { createAdHocSubscription, createSubscriptionFromPlan, processSubscriptionLogic, cancelSubscription, listSubscriptions, 
-    getSubscriptionById, };
+    getSubscriptionById, cancelSubscriptionByPlan};

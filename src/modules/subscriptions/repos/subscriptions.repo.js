@@ -263,6 +263,33 @@ async function getSubscriptionById(id) {
     return rows[0]; 
 }
 
+// En tu archivo checkout.repo.js
+async function getActiveSubscriptionByEmailAndPlan(email, mpPreapprovalPlanId, merchantId) {
+    const query = `
+        SELECT 
+            s.id AS subscription_id,           
+            s.plan_id AS internal_plan_id,    
+            s.mp_preapproval_id,              
+            s.reason AS subscription_name, 
+            u.id AS user_id, 
+            u.full_name AS user_name,           
+            u.email AS user_email
+        FROM subscriptions s
+        JOIN users u ON s.user_id = u.id
+        JOIN plans p ON s.plan_id = p.id      
+        WHERE u.email = $1 
+          AND p.mp_preapproval_plan_id = $2   
+          AND s.merchant_id = $3
+          AND s.status = 'authorized'
+        ORDER BY s.created_at DESC
+        LIMIT 1;
+    `;
+    
+    // Le pasamos los parámetros exactos: email, el ID de MP del plan, y el merchantId
+    const { rows } = await pool.query(query, [email, mpPreapprovalPlanId, merchantId]);
+    return rows[0]; 
+}
+
 module.exports = { createSubscription, getSubscriptionByMPId, updateStatus, updateNextBillingDate, 
-    getSubscriptionsByMerchant, getSubscriptionById
+    getSubscriptionsByMerchant, getSubscriptionById, getActiveSubscriptionByEmailAndPlan
  };
