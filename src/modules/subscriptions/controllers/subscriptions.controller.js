@@ -171,21 +171,27 @@ async function createSubscriptionFromPlan(req, res, next) {
 
 async function cancelSubscription(req, res, next) {
     try {
-        const { subscriptionId } = req.params; // Este debe ser el ID de MP (ej. 2c9380...) o el ID interno de tu DB, según cómo armes la ruta
+        const { id } = req.params; // Este debe ser el ID de MP (ej. 2c9380...) o el ID interno de tu DB, según cómo armes la ruta
         const authenticatedMerchantId = req.merchant?.id;
-
+        console.log("subscription", id);
         // 1. Validar autenticación del Merchant
         if (!authenticatedMerchantId) {
             return res.status(401).json({ ok: false, error: "No autorizado." });
         }
 
-        console.log(`📍 [CancelSub IN] Merchant ${authenticatedMerchantId} intentando cancelar Sub ID: ${subscriptionId}`);
+        console.log(`📍 [CancelSub IN] Merchant ${authenticatedMerchantId} intentando cancelar Sub ID: ${id}`);
 
         // 2. Buscar la suscripción en la DB (Tu función espera el ID de MP)
-        const subscription = await repo.getSubscriptionByMPId(subscriptionId);
+        const subscription = await repo.getSubscriptionById(id);
 
         if (!subscription) {
             return res.status(404).json({ ok: false, error: "Suscripción no encontrada en la base de datos." });
+        }
+
+        const mpPreapprovalId = subscription.mp_preapproval_id;
+        
+        if (!mpPreapprovalId) {
+             return res.status(400).json({ ok: false, error: "La suscripción no tiene un ID de Mercado Pago válido asociado." });
         }
 
         // 3. Validar que la suscripción pertenezca a este Merchant
@@ -195,7 +201,7 @@ async function cancelSubscription(req, res, next) {
 
         // 4. Cancelar en Mercado Pago
         console.log(`📡 [CancelSub MP] Llamando a Mercado Pago para cancelar...`);
-        const mpResult = await mpClient.cancelPreApproval(subscriptionId).catch(err => {
+        const mpResult = await mpClient.cancelPreApproval(mpPreapprovalId).catch(err => {
             // Manejamos si ya estaba cancelada en MP
             if (err.status === 400 && err.payload?.message?.includes("cancelled")) {
                 console.log(`⚠️ [CancelSub MP] La suscripción ya estaba cancelada en Mercado Pago.`);
@@ -206,7 +212,7 @@ async function cancelSubscription(req, res, next) {
 
         // 5. Actualizar la Base de Datos
         const rawPayload = mpResult.alreadyCancelled ? null : mpResult;
-        await repo.updateStatus(subscriptionId, "cancelled", rawPayload);
+        await repo.updateStatus(mpPreapprovalId, "cancelled", rawPayload);
 
         const message = mpResult.alreadyCancelled 
             ? "La suscripción ya estaba cancelada en MP." 
@@ -255,7 +261,7 @@ async function getSubscriptionById(req, res, next) {
 
         // Aquí asumo que tu repo tiene una función para buscar por ID
         // Si usas el ID de Mercado Pago, usa getSubscriptionByMPId
-        const subscription = await repo.getSubscriptionByMPId(id);
+        const subscription = await repo.getSubscriptionById(id);
 
         if (!subscription || subscription.merchant_id !== merchantId) {
             return res.status(404).json({ ok: false, error: "Suscripción no encontrada" });

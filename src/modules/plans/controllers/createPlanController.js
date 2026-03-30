@@ -141,7 +141,7 @@ async function cancelPlan(req, res, next) {
 
 async function updatePlan(req, res, next) {
     try {
-        const { id } = req.params; // ¡AQUÍ ESTÁ EL CAMBIO! Ahora recibes tu UUID interno.
+        const { id } = req.params; 
         const { reason, amount, frequency, frequency_type, status, back_url } = req.body;
         const merchantId = req.merchant?.id;
 

@@ -240,6 +240,29 @@ async function getSubscriptionsByMerchant(merchantId) {
     }
 }
 
+async function getSubscriptionById(id) {
+    const query = `
+         SELECT 
+            id, 
+            merchant_id,
+            mp_preapproval_id, 
+            user_id, 
+            plan_id, 
+            status, 
+            reason, 
+            transaction_amount AS amount, 
+            currency, 
+            next_billing_at AS next_payment_date, 
+            created_at
+        FROM subscriptions 
+        WHERE id = $1
+        ORDER BY created_at DESC    
+        
+    `;
+    const { rows } = await pool.query(query, [id]);
+    return rows[0]; 
+}
+
 module.exports = { createSubscription, getSubscriptionByMPId, updateStatus, updateNextBillingDate, 
-    getSubscriptionsByMerchant
+    getSubscriptionsByMerchant, getSubscriptionById
  };

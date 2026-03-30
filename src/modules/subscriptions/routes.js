@@ -14,6 +14,6 @@ router.post("/ad-hoc", controller.createAdHocSubscription);
 // Opción B: Rígida, basada en plan pre-creado en MP
 router.post("/plan", merchantAuth, controller.createSubscriptionFromPlan);
 
-router.put("/:subscriptionId/cancel", merchantAuth, controller.cancelSubscription);
+router.put("/:id/cancel", merchantAuth, controller.cancelSubscription);
 
 module.exports = router;
