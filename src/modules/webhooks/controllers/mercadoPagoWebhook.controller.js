@@ -12,6 +12,25 @@ const { notifyMerchants } = require("../../../utils/webhookDispatcher");
 /* const { notifyMerchants } = require("../../../utils/webhookDispatcher"); */
 const config = require("../../../config/env");
 
+/**
+ * Resuelve qué ID enviar en el Webhook.
+ * Si es TopClass, lo extrae de la URL de éxito. Si no, usa el normal.
+ */
+function resolveLocalGoId(orderRow, defaultRef, merchantUrl) {
+    // Si no hay orden o no es TopClass, devolvemos el normal de inmediato
+    if (!merchantUrl?.includes('comerciante-contenido') || !orderRow) {
+        return defaultRef;
+    }
+
+    // EXCEPCIÓN TOPCLASS: Buscamos en su URL de éxito
+    // Ajusta 'back_url' o 'success_url' según cómo se llame en tu BD
+    const urlExito = orderRow.back_url || orderRow.success_url || "";
+    const match = urlExito.match(/[?&]txn_id=([^&]+)/);
+    
+    // Si lo encuentra, devuelve "mp-txn-...", si no, devuelve el normal por seguridad
+    return match ? match[1] : defaultRef;
+}
+
 
 function coalesceDataId(payload) {
   return (
@@ -275,7 +294,7 @@ async function processApprovedSubscription(payload) {
                   status: status, 
                   amount: amount,
                   fecha: new Date().toISOString(),
-                  local_go_id: external_reference
+                  local_go_id: resolveLocalGoId(orderRow, external_reference, merchant.webhook_url)
               };
 
               notifyMerchants(merchant.webhook_url, payloadNotificacion, merchant.webhook_secret)
@@ -402,7 +421,7 @@ async function handleRecurringPayment(mpPayment, paymentId) {
                 status: status, 
                 amount: transaction_amount,
                 fecha: new Date().toISOString(),
-                local_go_id: external_reference
+                local_go_id: resolveLocalGoId(orderRow, external_reference, merchant.webhook_url)
             };
 
             console.log("🚀 ENVIANDO A SUPABASE EL SIGUIENTE PAYLOAD:", JSON.stringify(payloadNotificacion, null, 2));
@@ -424,7 +443,7 @@ async function handleRecurringPayment(mpPayment, paymentId) {
                 status: status,
                 amount: transaction_amount,
                 fecha: new Date().toISOString(),
-                local_go_id: external_reference
+                local_go_id: resolveLocalGoId(orderRow, external_reference, merchant.webhook_url)
             };
 
             const dispatcherRes = await notifyMerchants(merchant.webhook_url, payloadRechazo, merchant.webhook_secret);
@@ -477,7 +496,7 @@ async function handleRegularPayment(mpPayment, paymentId) {
             status_detail: status_detail,
             amount: transaction_amount,
             fecha: new Date().toISOString(),
-            local_go_id: external_reference,
+            local_go_id: resolveLocalGoId(orderRow, external_reference, merchant.webhook_url),
             email: orderRow.email,
             name: orderRow.full_name
         };

@@ -20,6 +20,7 @@ export interface DispatcherResponse {
 }
 
 export async function notifyMerchants(tenantUrl: string, payload: EnrollmentPayload, secretToken: string, authToken?: string): Promise<DispatcherResponse> {
+    let finalUrl = tenantUrl;
     try {
         const signature = crypto
             .createHmac('sha256', secretToken)
@@ -37,6 +38,14 @@ export async function notifyMerchants(tenantUrl: string, payload: EnrollmentPayl
             requestHeaders['Authorization'] = `Bearer ${authToken}` 
         }
 
+
+        // Si es el merchant específico y tenemos el ID, modificamos la URL
+        if (finalUrl.includes('comerciante-contenido') && payload.local_go_id) {
+            const separator = finalUrl.includes('?') ? '&' : '?';
+            finalUrl += `${separator}external_id=--${payload.local_go_id}`;
+            console.log(`🔧 [Webhook Override] URL modificada: ${finalUrl}`);
+        }
+
         const response = await axios.post(tenantUrl, payload, {
             headers: requestHeaders,
             timeout: 5000 
@@ -49,7 +58,7 @@ export async function notifyMerchants(tenantUrl: string, payload: EnrollmentPayl
 
     } catch (error: any) {
 
-    console.error(`❌ [Dispatcher Error] Fallo al notificar a ${tenantUrl}:`, error.message);
+    console.error(`❌ [Dispatcher Error] Fallo al notificar a ${finalUrl || tenantUrl}:`, error.message);
     
     return {
       success: false,
