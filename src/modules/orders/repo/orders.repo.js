@@ -15,7 +15,9 @@ async function getOrderById(orderReference) {
             o.merchant_id,
             o.mp_payment_id,
             u.full_name,
-            u.email
+            u.email,
+            success_url,
+            back_url
         FROM orders o
         LEFT JOIN order_items oi ON oi.order_id = o.id
         LEFT JOIN users u ON u.id = o.user_id
