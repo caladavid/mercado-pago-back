@@ -6,7 +6,6 @@ async function getOrderById(orderReference) {
             o.id,
             o.user_id,
             o.status, 
-            o.user_id, 
             o.total_amount,
             o.currency,
             o.type,           

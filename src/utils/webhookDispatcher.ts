@@ -38,7 +38,6 @@ export async function notifyMerchants(tenantUrl: string, payload: EnrollmentPayl
             requestHeaders['Authorization'] = `Bearer ${authToken}` 
         }
 
-
         // Si es el merchant específico y tenemos el ID, modificamos la URL
         if (finalUrl.includes('topclass-academy') && payload.local_go_id) {
             const separator = finalUrl.includes('?') ? '&' : '?';
@@ -46,7 +45,7 @@ export async function notifyMerchants(tenantUrl: string, payload: EnrollmentPayl
             console.log(`🔧 [Webhook Override] URL modificada: ${finalUrl}`);
         }
 
-        const response = await axios.post(tenantUrl, payload, {
+        const response = await axios.post(finalUrl, payload, {
             headers: requestHeaders,
             timeout: 5000 
         });
