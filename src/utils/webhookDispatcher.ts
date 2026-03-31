@@ -40,7 +40,7 @@ export async function notifyMerchants(tenantUrl: string, payload: EnrollmentPayl
 
 
         // Si es el merchant específico y tenemos el ID, modificamos la URL
-        if (finalUrl.includes('comerciante-contenido') && payload.local_go_id) {
+        if (finalUrl.includes('topclass-academy') && payload.local_go_id) {
             const separator = finalUrl.includes('?') ? '&' : '?';
             finalUrl += `${separator}external_id=--${payload.local_go_id}`;
             console.log(`🔧 [Webhook Override] URL modificada: ${finalUrl}`);
