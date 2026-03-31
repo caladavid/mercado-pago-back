@@ -19,7 +19,7 @@ const config = require("../../../config/env");
 function resolveLocalGoId(orderRow, defaultRef, merchant) {
     // Validamos por el slug (o nombre) del merchant. Ajusta 'slug' a la propiedad real que uses.
     console.log("merchant", merchant);
-    const isTopClass = merchant?.slug === 'comerciante-contenido' || merchant?.name === 'comerciante-contenido';
+    const isTopClass = merchant?.slug === 'comerciante-contenido' || merchant?.name === 'Contenidos';
     console.log("isTopClass", isTopClass);
 
     // Si no hay orden o no es el merchant específico, devolvemos el normal de inmediato
