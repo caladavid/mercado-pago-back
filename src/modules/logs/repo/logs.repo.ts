@@ -8,16 +8,17 @@ export const saveLog = async (logData: ISaveLog): Promise<{ id: string } | void>
         level = 'error', 
         source, 
         context, 
+        userEmail,
         message, 
         metadata = {} 
     } = logData;
 
     const query = `
-        INSERT INTO system_logs (level, source, context, message, metadata, created_at)
-        VALUES ($1, $2, $3, $4, $5, NOW())
+        INSERT INTO system_logs (level, source, context, message, user_email, metadata, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, NOW())
         RETURNING id;
     `;
-    const values = [level, source, context, message, JSON.stringify(metadata)];
+    const values = [level, source, context, message, userEmail, JSON.stringify(metadata)];
 
     try {
         const { rows } = await pool.query(query, values);

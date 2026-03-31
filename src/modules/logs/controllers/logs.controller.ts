@@ -33,8 +33,8 @@ async function receiveFrontendLog(
             source: 'frontend',
             context: context || 'general_frontend',
             message,
+            userEmail,
             metadata: {
-                user_email: userEmail,
                 stack_trace: stack,
                 raw_data: metadata
             }

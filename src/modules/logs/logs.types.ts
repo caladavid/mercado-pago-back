@@ -6,6 +6,7 @@ export interface ISaveLog {
     source: LogSource;
     context: string;
     message: string;
+    userEmail?: string;
     metadata?: Record<string, any>;
 }
 
