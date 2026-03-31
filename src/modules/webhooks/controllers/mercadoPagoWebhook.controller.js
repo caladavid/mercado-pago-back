@@ -16,14 +16,18 @@ const config = require("../../../config/env");
  * Resuelve qué ID enviar en el Webhook.
  * Si es TopClass, lo extrae de la URL de éxito. Si no, usa el normal.
  */
-function resolveLocalGoId(orderRow, defaultRef, merchantUrl) {
-    // Si no hay orden o no es TopClass, devolvemos el normal de inmediato
-    if (!merchantUrl?.includes('comerciante-contenido') || !orderRow) {
+function resolveLocalGoId(orderRow, defaultRef, merchant) {
+    // Validamos por el slug (o nombre) del merchant. Ajusta 'slug' a la propiedad real que uses.
+    console.log("merchant", merchant);
+    const isTopClass = merchant?.slug === 'comerciante-contenido' || merchant?.name === 'comerciante-contenido';
+    console.log("isTopClass", isTopClass);
+
+    // Si no hay orden o no es el merchant específico, devolvemos el normal de inmediato
+    if (!isTopClass || !orderRow) {
         return defaultRef;
     }
 
     // EXCEPCIÓN TOPCLASS: Buscamos en su URL de éxito
-    // Ajusta 'back_url' o 'success_url' según cómo se llame en tu BD
     const urlExito = orderRow.back_url || orderRow.success_url || "";
     const match = urlExito.match(/[?&]txn_id=([^&]+)/);
     
@@ -294,7 +298,7 @@ async function processApprovedSubscription(payload) {
                   status: status, 
                   amount: amount,
                   fecha: new Date().toISOString(),
-                  local_go_id: resolveLocalGoId(orderRow, external_reference, merchant.webhook_url)
+                  local_go_id: resolveLocalGoId(orderRow, external_reference, merchant)
               };
 
               notifyMerchants(merchant.webhook_url, payloadNotificacion, merchant.webhook_secret)
@@ -421,7 +425,7 @@ async function handleRecurringPayment(mpPayment, paymentId) {
                 status: status, 
                 amount: transaction_amount,
                 fecha: new Date().toISOString(),
-                local_go_id: resolveLocalGoId(orderRow, external_reference, merchant.webhook_url)
+                local_go_id: resolveLocalGoId(orderRow, external_reference, merchant)
             };
 
             console.log("🚀 ENVIANDO A SUPABASE EL SIGUIENTE PAYLOAD:", JSON.stringify(payloadNotificacion, null, 2));
@@ -443,7 +447,7 @@ async function handleRecurringPayment(mpPayment, paymentId) {
                 status: status,
                 amount: transaction_amount,
                 fecha: new Date().toISOString(),
-                local_go_id: resolveLocalGoId(orderRow, external_reference, merchant.webhook_url)
+                local_go_id: resolveLocalGoId(orderRow, external_reference, merchant)
             };
 
             const dispatcherRes = await notifyMerchants(merchant.webhook_url, payloadRechazo, merchant.webhook_secret);
@@ -496,7 +500,7 @@ async function handleRegularPayment(mpPayment, paymentId) {
             status_detail: status_detail,
             amount: transaction_amount,
             fecha: new Date().toISOString(),
-            local_go_id: resolveLocalGoId(orderRow, external_reference, merchant.webhook_url),
+            local_go_id: resolveLocalGoId(orderRow, external_reference, merchant),
             email: orderRow.email,
             name: orderRow.full_name
         };
